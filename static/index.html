@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#FAF6EE">
+  <meta name="description" content="A voice-first Indian bargaining arena. Make your move, read the room, lock the deal.">
+  <link rel="icon" href="data:,">
+  <title>MolBhaav — Street Smart Negotiation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css?v=5">
+  <script defer src="/static/audio_recorder.js?v=5"></script>
+  <script defer src="/static/receipt_canvas.js?v=5"></script>
+  <script defer src="/static/app.js?v=5"></script>
+</head>
+<body>
+  <div class="phone-shell">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="MolBhaav home">Mol<span>Bhaav</span><i>®</i></a>
+      <label class="player-handle"><span>YOU</span><input id="player-handle" type="text" maxlength="24" aria-label="Your optional player handle" autocomplete="nickname"></label>
+      <div class="top-actions">
+        <button class="icon-button" id="leaderboard-open" aria-label="Open leaderboard" title="Leaderboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10m7 10V4m7 16v-7M3 20h18"/></svg>
+        </button>
+        <button class="icon-button sound-toggle" id="mute-toggle" aria-label="Audio on." title="Audio on.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4Zm12-2a6 6 0 0 1 0 8m2-11a10 10 0 0 1 0 14"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <nav class="arena-tabs" aria-label="Choose a negotiation arena">
+      <button class="arena-tab active" data-arena="daily_market">Daily Market</button>
+      <button class="arena-tab" data-arena="placement_hr">Placement HR</button>
+      <button class="arena-tab" data-arena="freelance_client">Freelance</button>
+    </nav>
+
+    <main id="arena-view">
+      <section class="price-stage" aria-label="Current deal price">
+        <div class="stage-topline"><span class="eyebrow" id="arena-kicker">TODAY'S SHOWDOWN</span><span class="turn-pill" id="turn-count">TURN 1 / 4</span></div>
+        <div class="price-row"><div><p class="price-label" id="price-label">ASKING</p><h1 id="price-value" class="price-value">₹—</h1></div><span class="delta-pill" id="price-delta" aria-live="polite">READY</span></div>
+        <div class="telemetry" aria-label="Negotiation telemetry">
+          <div class="meter"><div class="meter-label"><span>CONFIDENCE</span><b id="confidence-value">—</b></div><div class="meter-track"><span id="confidence-bar"></span></div></div>
+          <div class="meter"><div class="meter-label"><span>BLUFF</span><b id="bluff-value">—</b></div><div class="meter-track blue"><span id="bluff-bar"></span></div></div>
+          <div class="meter patience-meter"><div class="meter-label"><span>PATIENCE</span><b id="patience-value">100%</b></div><div class="meter-track red"><span id="patience-bar" style="width:100%"></span></div></div>
+        </div>
+      </section>
+
+      <section class="boss-card" aria-label="Your negotiation opponent">
+        <div class="boss-portrait" id="boss-portrait" aria-hidden="true"></div>
+        <div class="boss-copy">
+          <div class="boss-heading"><div><p class="boss-role" id="boss-role">DAILY MARKET BOSS</p><h2 id="boss-name">Getting the bazaar ready…</h2></div><button class="hear-button" id="sample-audio" aria-label="Hear the boss's mood"><span class="speaker-glyph">♫</span><span>HEAR MOOD</span></button></div>
+          <p class="speech-bubble" id="boss-line">One moment, setting the opening price…</p>
+          <div class="voice-line"><button id="voice-play" class="voice-play" aria-label="Play opponent voice" disabled>▶</button><div class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span id="voice-caption">BOSS AUDIO</span><audio id="voice-audio" preload="none"></audio></div>
+        </div>
+      </section>
+
+      <div class="quick-row" id="quick-prompts" aria-label="Try a starter line"><span class="quick-label">TRY A MOVE</span></div>
+
+      <section class="transcript-card" aria-label="Negotiation transcript">
+        <div class="section-heading"><span>THE BACK & FORTH</span><span id="transcript-count">0 MOVES</span></div>
+        <div id="transcript-list" class="transcript-list"><p class="empty-transcript">Your first move goes here. Keep it respectful, specific, and a little clever.</p></div>
+      </section>
+
+      <aside class="coach-strip" id="coach-strip"><span class="coach-star">✳</span><p><b>THE STREET TIP</b><span id="coach-tip">Make one clear ask. A reason beats a random lowball.</span></p></aside>
+      <div class="bottom-spacer" aria-hidden="true"></div>
+    </main>
+
+    <section class="type-panel" id="type-panel" hidden aria-label="Type your negotiation move">
+      <form id="type-form"><label for="typed-move">YOUR COUNTER</label><div class="type-row"><input id="typed-move" maxlength="4000" placeholder="Make your case…" autocomplete="off"><button type="submit" aria-label="Send typed move">SEND ↗</button></div></form>
+    </section>
+
+    <footer class="control-dock" id="control-dock">
+      <button class="dock-side type-toggle" id="type-toggle"><span class="type-icon">Aa</span><small>TYPE</small></button>
+      <div class="mic-wrap"><canvas id="wave-ring" width="180" height="180" aria-hidden="true"></canvas><button class="mic-button" id="mic-button" aria-label="Hold to speak"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0m-7 7v3m-4 0h8"/></svg><span class="record-time" id="record-time">HOLD</span></button></div>
+      <button class="dock-side lock-button" id="lock-deal" disabled><span class="lock-stamp">LOCK</span><small>DEAL</small></button>
+    </footer>
+    <p class="dock-hint" id="dock-hint">HOLD TO SPEAK · 1.5–10 SEC</p>
+  </div>
+
+  <div class="overlay" id="leaderboard-panel" hidden>
+    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title"><button class="sheet-close" data-close="leaderboard-panel" aria-label="Close">×</button><p class="eyebrow" id="leaderboard-eyebrow">TODAY'S TOP HAGGLERS</p><h2 id="leaderboard-title">Bazaar bragging rights</h2><div class="leaderboard-tabs"><button data-board="daily_market" class="selected">Market</button><button data-board="placement_hr">HR</button><button data-board="freelance_client">Freelance</button></div><ol id="leaderboard-list" class="leaderboard-list"><li>Loading today's board…</li></ol></section>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
