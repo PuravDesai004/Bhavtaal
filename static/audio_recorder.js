@@ -51,7 +51,7 @@
     return btoa(binary);
   }
 
-  class MolAudioRecorder {
+  class BhavAudioRecorder {
     constructor(canvas, onTick) {
       this.canvas = canvas;
       this.onTick = onTick || function () {};
@@ -64,6 +64,47 @@
       this.frame = null;
       this.timer = null;
       this._cleanupPromise = null;
+    }
+
+    async _attachCaptureNode(source, silent) {
+      const handleChunk = (input) => {
+        if (!this.recording || !input || !input.length) return;
+        this.chunks.push(new Float32Array(input));
+        this.draw(input);
+      };
+      if (this.context.audioWorklet && typeof AudioWorkletNode === "function") {
+        let workletUrl = null;
+        try {
+          const workletCode =
+            'class BhavCaptureProcessor extends AudioWorkletProcessor{' +
+            'process(inputs){const c=inputs[0]&&inputs[0][0];' +
+            'if(c&&c.length){const copy=new Float32Array(c);this.port.postMessage(copy,[copy.buffer]);}return true;}}' +
+            'registerProcessor("bhav-capture",BhavCaptureProcessor);';
+          workletUrl = URL.createObjectURL(new Blob([workletCode], { type: "application/javascript" }));
+          await this.context.audioWorklet.addModule(workletUrl);
+          if (!this.context || this.context.state === "closed") return;
+          const worklet = new AudioWorkletNode(this.context, "bhav-capture", {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            channelCount: 1,
+          });
+          worklet.port.onmessage = (event) => handleChunk(event.data);
+          source.connect(worklet); worklet.connect(silent); silent.connect(this.context.destination);
+          this.processor = worklet;
+          return;
+        } catch (_) { /* Fall back to ScriptProcessorNode below if AudioWorklet fails. */ }
+        finally {
+          if (workletUrl) URL.revokeObjectURL(workletUrl);
+        }
+      }
+      if (typeof this.context.createScriptProcessor === "function") {
+        const processor = this.context.createScriptProcessor(2048, 1, 1);
+        processor.onaudioprocess = (event) => handleChunk(event.inputBuffer.getChannelData(0));
+        source.connect(processor); processor.connect(silent); silent.connect(this.context.destination);
+        this.processor = processor;
+        return;
+      }
+      throw new Error("This browser does not support microphone audio processing.");
     }
 
     async start() {
@@ -80,21 +121,15 @@
         await this.context.resume();
         this.chunks = [];
         const source = this.context.createMediaStreamSource(this.stream);
-        const processor = this.context.createScriptProcessor(2048, 1, 1);
         const silent = this.context.createGain(); silent.gain.value = 0;
-        processor.onaudioprocess = (event) => {
-          if (!this.recording) return;
-          const input = event.inputBuffer.getChannelData(0);
-          this.chunks.push(new Float32Array(input));
-          this.draw(input);
-        };
-        source.connect(processor); processor.connect(silent); silent.connect(this.context.destination);
-        this.processor = processor; this.source = source; this.silent = silent;
+        this.source = source; this.silent = silent;
+        await this._attachCaptureNode(source, silent);
+        if (!this.context || this.context.state === "closed") return false;
         this.recording = true; this.startedAt = performance.now();
         this.timer = window.setInterval(() => {
           const seconds = Math.min(10, (performance.now() - this.startedAt) / 1000);
           this.onTick(seconds);
-          if (seconds >= 10) window.dispatchEvent(new Event("molbhaav-recording-limit"));
+          if (seconds >= 10) window.dispatchEvent(new Event("bhavtaal-recording-limit"));
         }, 100);
         return true;
       } catch (error) {
@@ -136,7 +171,7 @@
           for (let i = 0; i < chunk.length; i += 1) squareTotal += chunk[i] * chunk[i];
         }
         const rms = Math.sqrt(squareTotal / total);
-        if (rms < 0.001) throw new Error("We didn't hear any speech. Move closer to the mic and try again.");
+        if (rms < 0.005) throw new Error("We didn't hear any speech. Move closer to the mic and try again.");
         result = { audio_b64: toBase64(wavFromFloat(joined, sampleRate)), duration };
       } catch (error) {
         captureError = error;
@@ -151,11 +186,13 @@
       this.recording = false;
       window.clearInterval(this.timer);
       if (this.frame) cancelAnimationFrame(this.frame);
-      const nodes = [this.processor, this.source, this.silent];
+      const processor = this.processor;
+      const nodes = [processor, this.source, this.silent];
       const stream = this.stream;
       const context = this.context;
       this.chunks = [];
       this.stream = this.context = this.processor = this.source = this.silent = this.timer = this.frame = null;
+      try { processor?.port?.close?.(); } catch (_) { /* port already closed */ }
       for (const node of nodes) {
         try { node?.disconnect(); } catch (_) { /* already disconnected */ }
       }
@@ -195,6 +232,6 @@
       oscillator.start(now); oscillator.stop(now + .22);
     } catch (_) { /* sound is optional */ }
   };
-  MolAudioRecorder.encodePcm16Wav = wavFromFloat;
-  window.MolAudioRecorder = MolAudioRecorder;
+  BhavAudioRecorder.encodePcm16Wav = wavFromFloat;
+  window.BhavAudioRecorder = BhavAudioRecorder;
 })();

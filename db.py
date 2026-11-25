@@ -70,6 +70,7 @@ def init_db() -> None:
                 turn_number INTEGER NOT NULL DEFAULT 0,
                 efficiency REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'active',
+                condition_id TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -130,6 +131,9 @@ def init_db() -> None:
             """
         )
         db.execute("DELETE FROM leaderboard WHERE deal_id IN (SELECT deal_id FROM deals WHERE status='walked_out')")
+        cols = {row["name"] for row in db.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "condition_id" not in cols:
+            db.execute("ALTER TABLE sessions ADD COLUMN condition_id TEXT NOT NULL DEFAULT ''")
 
 
 def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -144,15 +148,16 @@ def get_session(session_id: str) -> dict[str, Any] | None:
 
 def create_session(values: dict[str, Any]) -> None:
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+    record = {"condition_id": "", **values}
     with connect() as db:
         if _claim_stale_audio_prune():
             _prune_stale_session_audio(db, cutoff_iso)
         db.execute(
             """INSERT INTO sessions(session_id,arena_id,boss_id,player_name,date_ist,current_price,
-               start_price,patience,turn_number,efficiency,status,created_at,updated_at)
+               start_price,patience,turn_number,efficiency,status,condition_id,created_at,updated_at)
                VALUES(:session_id,:arena_id,:boss_id,:player_name,:date_ist,:current_price,
-               :start_price,100,0,0,'active',:created_at,:updated_at)""",
-            values,
+               :start_price,100,0,0,'active',:condition_id,:created_at,:updated_at)""",
+            record,
         )
 
 
@@ -166,12 +171,43 @@ def record_turn(session_id: str, values: dict[str, Any], session: dict[str, Any]
         if values.get("audio_b64"):
             db.execute("INSERT INTO session_audio(session_id,audio_b64) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET audio_b64=excluded.audio_b64",
                        (session_id, values["audio_b64"]))
+        else:
+            db.execute("DELETE FROM session_audio WHERE session_id=?", (session_id,))
         db.execute(
             """UPDATE sessions SET current_price=?,patience=?,turn_number=?,efficiency=?,status=?,updated_at=?
                WHERE session_id=?""",
             (session["current_price"], session["patience"], session["turn_number"], session["efficiency"],
              session["status"], session["updated_at"], session_id),
         )
+
+
+def get_turn(session_id: str, turn_number: int) -> dict[str, Any] | None:
+    with connect() as db:
+        row = db.execute(
+            "SELECT payload_json FROM turns WHERE session_id=? AND turn_number=?",
+            (session_id, turn_number),
+        ).fetchone()
+    return json.loads(row["payload_json"]) if row else None
+
+
+def save_turn_audio_if_latest(session_id: str, turn_number: int, audio_b64: str) -> bool:
+    with connect() as db:
+        row = db.execute(
+            "SELECT turn_number FROM sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        deal = db.execute(
+            "SELECT 1 FROM deals WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        if not row or deal is not None or int(row["turn_number"]) != int(turn_number):
+            return False
+        db.execute(
+            "INSERT INTO session_audio(session_id,audio_b64) VALUES(?,?) "
+            "ON CONFLICT(session_id) DO UPDATE SET audio_b64=excluded.audio_b64",
+            (session_id, audio_b64),
+        )
+        return True
 
 
 def list_turns(session_id: str, include_audio: bool = True) -> list[dict[str, Any]]:

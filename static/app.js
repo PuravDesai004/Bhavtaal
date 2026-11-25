@@ -2,8 +2,8 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const state = { arenas: [], session: null, arena: null, turns: [], busy: false, ended: false, audioUrl: null, recorder: null, timer: null, muted: false, currentTtsFallback: true, pointerHeld: false, activePointerId: null, recordingToken: 0, playerName: "" };
-  const HANDLE_KEY = "molbhaav-player-name";
+  const state = { arenas: [], session: null, arena: null, turns: [], busy: false, ended: false, audioUrl: null, recorder: null, timer: null, muted: false, currentTtsFallback: true, pointerHeld: false, activePointerId: null, recordingToken: 0, stoppingRecording: false, audioRequestToken: 0, playerName: "" };
+  const HANDLE_KEY = "bhavtaal-player-name";
   const cash = (amount) => {
     const num = Number(amount || 0);
     const sign = num < 0 ? "-" : "";
@@ -33,20 +33,30 @@
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(clean);
     const voices = window.speechSynthesis.getVoices();
-    utterance.voice = voices.find((voice) => /en-IN|hi-IN/i.test(voice.lang)) || null;
-    utterance.lang = utterance.voice?.lang || "en-IN"; utterance.rate = 1.02;
+    const indianVoice =
+      voices.find((voice) => /en[-_]in/i.test(voice.lang)) ||
+      voices.find((voice) => /hi[-_]in/i.test(voice.lang)) ||
+      voices.find((voice) => /\b(india|indian|hindi|heera|ravi|prabhat|neerja|veena|lekha|aditi|kajal)\b/i.test(voice.name || ""));
+    utterance.voice = indianVoice || null;
+    utterance.lang = indianVoice?.lang || "en-IN"; utterance.rate = 0.98;
     window.speechSynthesis.speak(utterance);
   }
   function setAudio(base64, url, text, ttsFallback = false) {
     document.querySelector(".equalizer")?.classList.remove("playing");
     const audio = $("voice-audio");
-    audio.pause();
-    audio.muted = state.muted;
+    const voicePlay = $("voice-play");
+    const voiceCaption = $("voice-caption");
     window.speechSynthesis?.cancel();
     state.currentTtsFallback = Boolean(ttsFallback);
-    $("voice-play").classList.remove("play-blocked");
+    voicePlay?.classList.remove("play-blocked");
     if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
     state.audioUrl = null;
+    if (!audio) {
+      if (voicePlay) voicePlay.disabled = true;
+      return;
+    }
+    audio.pause();
+    audio.muted = state.muted;
     if (url) audio.src = url;
     else if (base64) {
       try {
@@ -55,8 +65,8 @@
         state.audioUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" })); audio.src = state.audioUrl;
       } catch (_) { audio.removeAttribute("src"); audio.load(); state.currentTtsFallback = true; }
     } else { audio.removeAttribute("src"); audio.load(); }
-    $("voice-play").disabled = !base64 && !url && !text;
-    $("voice-caption").textContent = audio.getAttribute("src") ? "BOSS AUDIO" : "SPEAK REPLY";
+    if (voicePlay) voicePlay.disabled = !base64 && !url && !text;
+    if (voiceCaption) voiceCaption.textContent = audio.getAttribute("src") ? "BOSS AUDIO" : "SPEAK REPLY";
     audio.onplay = () => document.querySelector(".equalizer")?.classList.add("playing");
     audio.onpause = () => document.querySelector(".equalizer")?.classList.remove("playing");
     audio.onended = () => document.querySelector(".equalizer")?.classList.remove("playing");
@@ -66,26 +76,29 @@
         audio.removeAttribute("src");
         audio.load();
         state.currentTtsFallback = true;
-        $("voice-caption").textContent = "SPEAK REPLY";
+        if (voiceCaption) voiceCaption.textContent = "SPEAK REPLY";
       }
     };
   }
   async function playCurrentVoice() {
     if (state.muted) { toast("Audio is muted — tap the speaker icon to hear the boss."); return; }
     const audio = $("voice-audio");
-    if (audio.getAttribute("src")) {
-      try { await audio.play(); $("voice-play").classList.remove("play-blocked"); }
+    const voicePlay = $("voice-play");
+    const voiceCaption = $("voice-caption");
+    const bossLine = $("boss-line");
+    if (audio && audio.getAttribute("src")) {
+      try { await audio.play(); voicePlay?.classList.remove("play-blocked"); }
       catch (error) {
-        if (error?.name === "NotAllowedError") $("voice-play").classList.add("play-blocked");
+        if (error?.name === "NotAllowedError") voicePlay?.classList.add("play-blocked");
         else {
           audio.removeAttribute("src");
           audio.load();
           state.currentTtsFallback = true;
-          $("voice-caption").textContent = "SPEAK REPLY";
-          playText(stripVoiceTags($("boss-line").textContent));
+          if (voiceCaption) voiceCaption.textContent = "SPEAK REPLY";
+          playText(stripVoiceTags(bossLine?.textContent || ""));
         }
       }
-    } else if (state.currentTtsFallback && !state.muted) playText(stripVoiceTags($("boss-line").textContent));
+    } else if (state.currentTtsFallback && !state.muted) playText(stripVoiceTags(bossLine?.textContent || ""));
   }
   function updateArenaCard(arena, greeting) {
     state.arena = arena;
@@ -93,6 +106,17 @@
     $("price-label").textContent = arena.direction === "downward" ? "ASKING" : "OPENING OFFER";
     $("boss-name").textContent = arena.boss_name;
     $("boss-role").textContent = arena.role.toUpperCase();
+    const condPill = $("condition-pill");
+    if (condPill) {
+      if (arena.condition_label) {
+        condPill.textContent = arena.condition_brief
+          ? `${arena.condition_label} · ${arena.condition_brief}`
+          : arena.condition_label;
+        condPill.hidden = false;
+      } else {
+        condPill.hidden = true;
+      }
+    }
     $("boss-line").textContent = greeting || arena.greeting || "All right, make your move.";
     $("boss-portrait").innerHTML = arena.avatar_svg || "";
     $("price-value").textContent = cash(arena.start_price);
@@ -143,8 +167,37 @@
       try { localStorage.setItem(HANDLE_KEY, state.playerName); } catch (_) { /* storage may be disabled */ }
     });
   }
+  function readLastSelection(arenaId) {
+    if (state.arena?.arena_id === arenaId) {
+      return {
+        bossId: state.arena.boss_id || null,
+        price: state.arena.start_price ?? null,
+        conditionId: state.arena.condition_id || null,
+      };
+    }
+    try {
+      const bossId = window.localStorage.getItem(`bhavtaal-last-boss-${arenaId}`) || null;
+      const rawPrice = window.localStorage.getItem(`bhavtaal-last-price-${arenaId}`);
+      const price = rawPrice !== null && rawPrice !== "" ? Number(rawPrice) : null;
+      const conditionId = window.localStorage.getItem(`bhavtaal-last-condition-${arenaId}`) || null;
+      return { bossId, price: Number.isFinite(price) ? price : null, conditionId };
+    } catch {
+      return { bossId: null, price: null, conditionId: null };
+    }
+  }
+
+  function rememberSelection(arena) {
+    if (!arena?.arena_id) return;
+    try {
+      window.localStorage.setItem(`bhavtaal-last-boss-${arena.arena_id}`, arena.boss_id || "");
+      window.localStorage.setItem(`bhavtaal-last-price-${arena.arena_id}`, String(arena.start_price ?? ""));
+      window.localStorage.setItem(`bhavtaal-last-condition-${arena.arena_id}`, arena.condition_id || "");
+    } catch { /* ignore private-mode storage errors */ }
+  }
+
   async function startArena(arenaId) {
     if (state.busy) return;
+    state.audioRequestToken += 1;
     if (state.pointerHeld || state.recorder?.recording || state.recorder?.starting) {
       state.pointerHeld = false; state.activePointerId = null; state.recordingToken += 1;
       clearInterval(state.timer); $("mic-button").classList.remove("recording"); $("record-time").textContent = "HOLD";
@@ -152,8 +205,16 @@
     }
     state.busy = true;
     try {
-      const session = await api("/api/session/start", { arena_id: arenaId, player_name: currentPlayerName() });
+      const previous = readLastSelection(arenaId);
+      const session = await api("/api/session/start", {
+        arena_id: arenaId,
+        player_name: currentPlayerName(),
+        exclude_boss_id: previous.bossId,
+        exclude_price: previous.price,
+        exclude_condition_id: previous.conditionId,
+      });
       state.session = session; state.turns = [];
+      rememberSelection(session.arena);
       updateArenaCard(session.arena, session.opening_greeting);
       document.querySelectorAll(".arena-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.arena === arenaId));
       $("typed-move").value = ""; $("type-panel").hidden = true;
@@ -177,13 +238,27 @@
     copy.append(you, boss); row.append(tag, copy); list.append(row); list.scrollTop = list.scrollHeight;
     $("transcript-count").textContent = `${state.turns.length} ${state.turns.length === 1 ? "MOVE" : "MOVES"}`;
   }
+  async function fetchTurnAudio(sessionId, turnNumber, replyText, token) {
+    try {
+      const audioResult = await api("/api/turn/audio", { session_id: sessionId, turn_number: turnNumber });
+      if (token !== state.audioRequestToken || state.session?.session_id !== sessionId) return;
+      setAudio(audioResult.audio_b64, null, replyText, audioResult.tts_fallback);
+      if (!state.muted) await playCurrentVoice();
+    } catch (_) {
+      if (token !== state.audioRequestToken || state.session?.session_id !== sessionId) return;
+      setAudio(null, null, replyText, true);
+      if (!state.muted) await playCurrentVoice();
+    }
+  }
   async function submitMove({ text, audio_b64 }) {
     if (state.ended) return;
     if (!state.session || state.busy) return;
+    const sessionId = state.session.session_id;
+    const audioToken = ++state.audioRequestToken;
     state.busy = true; $("mic-button").classList.add("processing");
     $("dock-hint").textContent = "READING THE ROOM…";
     try {
-      const result = await api("/api/turn", { session_id: state.session.session_id, text: text || null, audio_b64: audio_b64 || null });
+      const result = await api("/api/turn", { session_id: sessionId, text: text || null, audio_b64: audio_b64 || null });
       addTurn(result, text);
       $("price-value").textContent = cash(result.current_price);
       $("price-value").classList.toggle("compact", Number(result.current_price) >= 100000);
@@ -202,7 +277,6 @@
       document.querySelector(".boss-card").dataset.mood = result.boss_mood;
       $("boss-line").textContent = stripVoiceTags(result.reply_text);
       $("coach-tip").textContent = result.coach_tip;
-      setAudio(result.audio_b64, null, result.reply_text, result.tts_fallback);
       const lockButton = $("lock-deal");
       lockButton.disabled = false; lockButton.classList.toggle("ready", goodDirection);
       $("quick-prompts").hidden = true;
@@ -219,7 +293,17 @@
       } else $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC";
       if (result.walked_out || result.tactic === "prompt_injection") window.playBazaarSound?.("buzzer");
       else if (goodDirection) window.playBazaarSound?.("price");
-      if (!state.muted) await playCurrentVoice();
+      if (result.audio_b64) {
+        setAudio(result.audio_b64, null, result.reply_text, result.tts_fallback);
+        if (!state.muted) await playCurrentVoice();
+      } else if (result.audio_pending && !state.muted) {
+        setAudio(null, null, result.reply_text, true);
+        $("voice-caption").textContent = "LOADING VOICE…";
+        fetchTurnAudio(sessionId, result.turn, result.reply_text, audioToken);
+      } else {
+        setAudio(null, null, result.reply_text, true);
+        if (result.tts_fallback && !state.muted) await playCurrentVoice();
+      }
     } catch (error) {
       toast(error.message);
       $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC";
@@ -255,26 +339,37 @@
   async function sampleMood() {
     if (state.muted) { toast("Audio is muted — tap the speaker icon to hear the boss."); return; }
     if (!state.arena || state.busy) return;
+    state.audioRequestToken += 1;
     const button = $("sample-audio"); button.disabled = true;
     try {
-      const result = await api("/api/session/sample-audio", { arena_id: state.arena.arena_id });
+      const result = await api("/api/session/sample-audio", {
+        arena_id: state.arena.arena_id,
+        session_id: state.session?.session_id || null,
+      });
       setAudio(result.audio_b64, null, result.fallback_text, result.tts_fallback);
       await playCurrentVoice();
     } catch (error) { toast(error.message); }
     finally { button.disabled = false; }
   }
   async function stopRecording() {
+    if (state.stoppingRecording) return;
+    if (!state.recorder?.recording && !state.pointerHeld) return;
+    state.stoppingRecording = true;
     state.pointerHeld = false; state.activePointerId = null; state.recordingToken += 1;
-    if (!state.recorder?.recording) return;
-    clearInterval(state.timer); $("mic-button").classList.remove("recording");
-    $("record-time").textContent = "HOLD"; $("dock-hint").textContent = "ENCODING CLEAN WAV…";
     try {
-      const result = await state.recorder.stop();
-      if (!result) { toast("Hold for at least 1.5 seconds to make your case."); $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC"; return; }
-      const audio_b64 = result.audio_b64;
-      await submitMove({ audio_b64 });
-      // The browser drops the player's WAV after the request; it is never written to storage.
-    } catch (error) { toast(error.message || "Microphone recording stopped."); $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC"; }
+      if (!state.recorder?.recording) return;
+      clearInterval(state.timer); $("mic-button").classList.remove("recording");
+      $("record-time").textContent = "HOLD"; $("dock-hint").textContent = "ENCODING CLEAN WAV…";
+      try {
+        const result = await state.recorder.stop();
+        if (!result) { toast("Hold for at least 1.5 seconds to make your case."); $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC"; return; }
+        const audio_b64 = result.audio_b64;
+        await submitMove({ audio_b64 });
+        // The browser drops the player's WAV after the request; it is never written to storage.
+      } catch (error) { toast(error.message || "Microphone recording stopped."); $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC"; }
+    } finally {
+      state.stoppingRecording = false;
+    }
   }
   async function startRecording(event, token = state.recordingToken) {
     if (event) { event.preventDefault(); }
@@ -345,7 +440,7 @@
           ? '<p class="receipt-rank">UNRANKED</p>'
           : `<p class="receipt-rank">RANK #${rank}</p><p class="receipt-rank-caption">TOP ${Math.max(1, Math.round(100 - percentile))}% OF ${deal.arena_id === "daily_market" ? "TODAY'S" : "ALL-TIME"} HAGGLERS</p>`;
       root.innerHTML = `<p class="eyebrow">THERMAL DEAL RECEIPT</p><h1>${escapeHtml(title)}</h1>
-        <article class="receipt-card" id="receipt-card"><div class="receipt-brand">Mol<span>Bhaav</span></div><hr class="receipt-rule"><div class="receipt-meta"><span>${escapeHtml(deal.arena_label)}</span><span>${escapeHtml(deal.date_ist)}</span></div>
+        <article class="receipt-card" id="receipt-card"><div class="receipt-brand">Bhav<span>Taal</span></div><hr class="receipt-rule"><div class="receipt-meta"><span>${escapeHtml(deal.arena_label)}</span><span>${escapeHtml(deal.date_ist)}</span></div>
         <h2 class="receipt-boss">${escapeHtml(deal.boss.boss_name)}</h2><p class="receipt-item">${escapeHtml(deal.boss.item)}</p><p class="receipt-price-label">${openingLabel}</p><div class="receipt-price">${cash(deal.starting_price)}</div><div class="receipt-arrow${upward && !neutral ? " upward" : ""}${penalty || walkedOut ? " penalty" : ""}${neutral ? " neutral" : ""}">${arrowLabel}</div><div class="receipt-price">${cash(deal.final_price)}</div>
         <div class="${movementClass}">${movementLabel}</div>${rankMarkup}<p class="receipt-dots">· · · · · · · · · · · · · · · · · · · ·</p><p class="receipt-item">${escapeHtml(deal.player_name)} · ${Number(deal.efficiency_pct).toFixed(0)}% efficiency</p></article>
         <div class="receipt-actions"><button class="primary" id="share-deal">CHALLENGE A FRIEND ↗</button><button id="download-receipt">SAVE 9:16 RECEIPT</button></div>
@@ -354,10 +449,10 @@
       $("share-deal").addEventListener("click", async () => {
         const shareUrl = new URL(`/deal/${deal.deal_id}`, window.location.origin).href;
         const message = walkedOut
-          ? `I walked away from ${deal.boss.boss_name} on MolBhaav. The shutter came down at ${cash(deal.final_price)}. Think you can do better?`
-          : `I got ${cash(deal.final_price)} with ${deal.boss.boss_name} on MolBhaav. Think you can beat my deal?`;
+          ? `I walked away from ${deal.boss.boss_name} on BhavTaal. The shutter came down at ${cash(deal.final_price)}. Think you can do better?`
+          : `I got ${cash(deal.final_price)} with ${deal.boss.boss_name} on BhavTaal. Think you can beat my deal?`;
         try {
-          if (navigator.share) await navigator.share({ title: walkedOut ? "I walked away on MolBhaav" : "Beat my MolBhaav deal", text: message, url: shareUrl });
+          if (navigator.share) await navigator.share({ title: walkedOut ? "I walked away on BhavTaal" : "Beat my BhavTaal deal", text: message, url: shareUrl });
           else { await navigator.clipboard.writeText(`${message} ${shareUrl}`); toast("Challenge copied. Send it to your bargaining rival."); }
         } catch (error) { if (error.name !== "AbortError") { try { await navigator.clipboard.writeText(`${message} ${shareUrl}`); toast("Challenge copied to clipboard."); } catch (_) { toast(shareUrl); } } }
       });
@@ -365,7 +460,7 @@
     }).catch((error) => { $("receipt-root").innerHTML = `<p class="eyebrow">RECEIPT NOT FOUND</p><h1>${escapeHtml(error.message)}</h1><a class="cta-wide" href="/">START A NEW SHOWDOWN</a>`; });
   }
   function bind() {
-    state.recorder = new window.MolAudioRecorder($("wave-ring"), () => {});
+    state.recorder = new window.BhavAudioRecorder($("wave-ring"), () => {});
     initializePlayerHandle();
     document.querySelectorAll(".arena-tab").forEach((tab) => tab.addEventListener("click", () => startArena(tab.dataset.arena)));
     $("quick-prompts").addEventListener("click", (event) => {
@@ -389,9 +484,10 @@
     });
     ["pointerup", "pointercancel", "lostpointercapture"].forEach((name) => $("mic-button").addEventListener(name, (event) => {
       if (state.activePointerId !== null && event.pointerId !== state.activePointerId) return;
+      if (!state.pointerHeld && !state.recorder?.recording) return;
       stopRecording();
     }));
-    window.addEventListener("molbhaav-recording-limit", stopRecording);
+    window.addEventListener("bhavtaal-recording-limit", stopRecording);
     $("lock-deal").addEventListener("click", finishDeal);
     $("leaderboard-open").addEventListener("click", () => openLeaderboard("daily_market"));
     document.querySelectorAll("[data-board]").forEach((button) => button.addEventListener("click", () => openLeaderboard(button.dataset.board)));
@@ -402,6 +498,8 @@
       $("voice-audio").muted = state.muted;
       if (state.muted) { $("voice-audio").pause(); window.speechSynthesis?.cancel(); }
       const audioStatus = state.muted ? "Audio muted." : "Audio on.";
+      event.currentTarget.classList.toggle("muted", state.muted);
+      event.currentTarget.setAttribute("aria-pressed", String(state.muted));
       event.currentTarget.setAttribute("aria-label", audioStatus);
       event.currentTarget.title = audioStatus;
       toast(audioStatus);

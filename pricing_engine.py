@@ -7,6 +7,16 @@ from math import isfinite
 STRONG_TACTICS = {"anchoring", "mirroring", "walk_away_batna", "bundle_trade"}
 
 
+def compute_efficiency(direction: str, start_price: int, current_price: int, limit_price: int) -> float:
+    """Calculate percentage of available negotiation room captured in the player's favor."""
+    total_range = max(1, abs(int(start_price) - int(limit_price)))
+    gained = abs(int(start_price) - int(current_price)) if (
+        (direction == "downward" and current_price < start_price)
+        or (direction == "upward" and current_price > start_price)
+    ) else 0
+    return round((gained / total_range) * 100, 1)
+
+
 def compute_turn_outcome(
     direction: str,
     current_price: int,
@@ -78,12 +88,7 @@ def compute_turn_outcome(
         patience_drop = max(5, patience_drop - 8)
     new_patience = max(0, min(100, int(patience) - patience_drop))
 
-    total_range = max(1, abs(start_price - limit_price))
-    gained = abs(start_price - new_price) if (
-        (direction == "downward" and new_price < start_price)
-        or (direction == "upward" and new_price > start_price)
-    ) else 0
-    efficiency_pct = round((gained / total_range) * 100, 1)
+    efficiency_pct = compute_efficiency(direction, start_price, new_price, limit_price)
     return {
         "new_price": int(new_price),
         "price_delta": int(new_price - current_price),

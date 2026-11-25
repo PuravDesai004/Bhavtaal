@@ -109,8 +109,10 @@ def persist_ai_audio(deal_id: str, wav_bytes: bytes | None) -> str | None:
         if response.status_code == 409:
             auth_headers = {"Authorization": f"Bearer {token}"}
             for old_id, old_name in _list_prunable(client, storage_url, auth_headers):
-                _prune_file(client, base, old_name, old_id, auth_headers)
-            response = client.put(f"{base}/{quote(filename, safe='')}", content=wav_bytes, headers=headers)
+                if _prune_file(client, base, old_name, old_id, auth_headers):
+                    response = client.put(f"{base}/{quote(filename, safe='')}", content=wav_bytes, headers=headers)
+                    if response.status_code != 409:
+                        break
         if response.status_code >= 400:
             logger.warning("Embarko audio upload failed (HTTP %s)", response.status_code)
             response.raise_for_status()

@@ -1,8 +1,9 @@
-"""Single-process FastAPI server for MolBhaav."""
+"""Single-process FastAPI server for BhavTaal."""
 from __future__ import annotations
 
 import base64
 import binascii
+import hmac
 import html
 import json
 import logging
@@ -15,6 +16,7 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -24,7 +26,7 @@ from pydantic import BaseModel, Field
 import db
 import gemini_pipeline
 import storage
-from arenas import arena_by_boss_id, internal_arena, public_arena, public_arenas
+from arenas import arena_by_boss_id, internal_arena, pick_arena, public_arena, public_arenas
 from config import (
     STATIC_DIR,
     UTC,
@@ -35,7 +37,7 @@ from config import (
     port,
     utc_timestamp,
 )
-from pricing_engine import compute_turn_outcome
+from pricing_engine import compute_efficiency, compute_turn_outcome
 
 MAX_AUDIO_BYTES = 750 * 1024
 RATE_MESSAGE = "Bhaiya needs a chai break—try again in a few seconds!"
@@ -84,14 +86,17 @@ class SessionLockPool:
                 entry = {"lock": threading.Lock(), "users": 0}
                 self._entries[session_id] = entry
             entry["users"] += 1
-        entry["lock"].acquire()
+        acquired = False
         try:
+            entry["lock"].acquire()
+            acquired = True
             yield
         finally:
-            entry["lock"].release()
+            if acquired:
+                entry["lock"].release()
             with self._guard:
                 entry["users"] -= 1
-                if entry["users"] == 0:
+                if entry["users"] <= 0 and self._entries.get(session_id) is entry:
                     self._entries.pop(session_id, None)
 
 
@@ -107,22 +112,56 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="MolBhaav", version="1.0.0", debug=False, lifespan=lifespan)
+app = FastAPI(title="BhavTaal", version="1.0.0", debug=False, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def enforce_same_origin(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        sec_fetch_site = request.headers.get("sec-fetch-site", "").strip().lower()
+        if sec_fetch_site == "cross-site":
+            return JSONResponse(status_code=403, content={"detail": "Cross-origin requests are not allowed."})
+        origin = request.headers.get("origin", "").strip()
+        if origin:
+            if origin.lower() == "null":
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin requests are not allowed."})
+            origin_host = urlparse(origin).netloc.lower()
+            allowed_hosts = {
+                host.split(",", 1)[0].strip().lower()
+                for host in (
+                    request.headers.get("x-forwarded-host", ""),
+                    request.headers.get("host", ""),
+                    request.url.netloc,
+                )
+                if host and host.strip()
+            }
+            if not origin_host or (allowed_hosts and origin_host not in allowed_hosts):
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin requests are not allowed."})
+    return await call_next(request)
 
 
 class StartBody(BaseModel):
     arena_id: str = "daily_market"
     player_name: str | None = Field(None, max_length=32)
+    exclude_boss_id: str | None = Field(None, max_length=64)
+    exclude_price: int | None = None
+    exclude_condition_id: str | None = Field(None, max_length=64)
 
 
 class SampleBody(BaseModel):
     arena_id: str = "daily_market"
+    session_id: str | None = Field(None, max_length=64)
 
 
 class TurnBody(BaseModel):
     session_id: str
     audio_b64: str | None = Field(None, max_length=1_024_008)
     text: str | None = Field(None, max_length=4000)
+
+
+class TurnAudioBody(BaseModel):
+    session_id: str
+    turn_number: int = Field(..., ge=1, le=4)
 
 
 class FinishBody(BaseModel):
@@ -159,7 +198,8 @@ def _ip(request: Request) -> str:
     first_hop = forwarded.split(",", 1)[0].strip()
     if first_hop:
         return first_hop
-    return request.client.host if request.client else "unknown"
+    host = (request.client.host or "").strip() if request.client else ""
+    return host or "unknown"
 
 
 def _rate_limited_response(request: Request, rate_limiter: SlidingWindowLimiter) -> JSONResponse | None:
@@ -177,13 +217,23 @@ def home():
 def health():
     daily = internal_arena("daily_market")
     storage_mode = "embarko" if os.environ.get("STORAGE_URL") and os.environ.get("STORAGE_TOKEN") else "local"
-    return {"status": "ok", "daily_boss_id": daily["boss_id"], "ist_date": ist_date().isoformat(),
-            "gemini_configured": gemini_pipeline.gemini_configured(), "storage_mode": storage_mode}
+    sarvam_ok = gemini_pipeline.sarvam_configured()
+    gemini_ok = gemini_pipeline.gemini_configured()
+    tts_provider = "sarvam" if sarvam_ok else ("gemini" if gemini_ok else "browser")
+    return {
+        "status": "ok",
+        "daily_boss_id": daily["boss_id"],
+        "ist_date": ist_date().isoformat(),
+        "gemini_configured": gemini_ok,
+        "sarvam_configured": sarvam_ok,
+        "tts_provider": tts_provider,
+        "storage_mode": storage_mode,
+    }
 
 
 @app.get("/api/arenas")
 def get_arenas():
-    return {"ist_date": ist_date().isoformat(), "arenas": public_arenas()}
+    return {"ist_date": ist_date().isoformat(), "arenas": public_arenas(shuffle=True)}
 
 
 @app.post("/api/session/start")
@@ -192,7 +242,12 @@ def start_session(body: StartBody, request: Request):
     if limited:
         return limited
     try:
-        arena = internal_arena(body.arena_id)
+        arena = pick_arena(
+            body.arena_id,
+            exclude_boss_id=body.exclude_boss_id,
+            exclude_price=body.exclude_price,
+            exclude_condition_id=body.exclude_condition_id,
+        )
     except KeyError:
         raise HTTPException(404, "That arena is not on the board.") from None
     session_id = uuid.uuid4().hex
@@ -200,7 +255,8 @@ def start_session(body: StartBody, request: Request):
     player_name = _name(body.player_name, f"JugaadKing_{int(session_id[:8], 16) % 90 + 10}")
     db.create_session({"session_id": session_id, "arena_id": body.arena_id, "boss_id": arena["boss_id"],
         "player_name": player_name, "date_ist": ist_date().isoformat(), "current_price": arena["start_price"],
-        "start_price": arena["start_price"], "created_at": now, "updated_at": now})
+        "start_price": arena["start_price"], "condition_id": arena.get("condition_id", ""),
+        "created_at": now, "updated_at": now})
     return {"session_id": session_id, "arena": public_arena(arena), "player_name": player_name,
             "opening_greeting": arena["greeting"], "sample_audio_b64": None}
 
@@ -210,10 +266,23 @@ def sample_audio(body: SampleBody, request: Request):
     limited = _rate_limited_response(request, session_limiter)
     if limited:
         return limited
-    try:
-        arena = internal_arena(body.arena_id)
-    except KeyError:
-        raise HTTPException(404, "That arena is not on the board.") from None
+    arena = None
+    if body.session_id:
+        session = db.get_session(body.session_id)
+        if session:
+            try:
+                arena = arena_by_boss_id(
+                    session["boss_id"],
+                    start_price=session["start_price"],
+                    condition_id=session.get("condition_id") or None,
+                )
+            except KeyError:
+                arena = None
+    if arena is None:
+        try:
+            arena = internal_arena(body.arena_id)
+        except KeyError:
+            raise HTTPException(404, "That arena is not on the board.") from None
     audio = gemini_pipeline.sample_audio(arena)
     return {"audio_b64": base64.b64encode(audio).decode("ascii") if audio else None,
             "tts_fallback": audio is None, "fallback_text": arena["greeting"]}
@@ -241,9 +310,14 @@ def _submit_turn(body: TurnBody, request: Request):
     if session["turn_number"] >= 4:
         raise HTTPException(409, "This was your fourth turn. Lock in the result.")
 
-    arena = arena_by_boss_id(session["boss_id"])
+    arena = arena_by_boss_id(
+        session["boss_id"],
+        start_price=session["start_price"],
+        condition_id=session.get("condition_id") or None,
+    )
     arena["current_price"] = session["current_price"]
-    move = gemini_pipeline.analyze_turn(text or None, audio_bytes, arena)
+    prior_turns = db.list_turns(body.session_id, include_audio=False)
+    move = gemini_pipeline.evaluate_and_reply(arena, text or None, audio_bytes, session["patience"], history=prior_turns)
     turn = session["turn_number"] + 1
     outcome = compute_turn_outcome(arena["direction"], session["current_price"], session["start_price"],
         arena["limit_price"], arena["step"], session["patience"], move["vocal_conf"], move["bluff_prob"],
@@ -258,21 +332,24 @@ def _submit_turn(body: TurnBody, request: Request):
     if accepting:
         outcome.update({
             "new_price": session["current_price"], "price_delta": 0,
-            "new_patience": session["patience"], "efficiency_pct": session["efficiency"],
+            "new_patience": session["patience"],
+            "efficiency_pct": compute_efficiency(
+                arena["direction"], session["start_price"], session["current_price"], arena["limit_price"]
+            ),
             "walked_out": False, "pct_move": 0.0,
         })
-    prior_turns = db.list_turns(body.session_id, include_audio=False)
-    dialogue = gemini_pipeline.generate_dialogue(arena, move, outcome, text or None, audio_bytes, history=prior_turns)
-    audio = gemini_pipeline.synthesize_speech(arena, dialogue["reply_text"], dialogue["delivery_style"])
+    reply_text = gemini_pipeline.render_boss_reply(arena, move, outcome, move)
+    delivery_style = str(move.get("delivery_style") or "expressive conversational market banter")[:80]
+    coach_tip = str(move.get("coach_tip") or "Tie your ask to one concrete reason the other side values.")[:180]
     status = "walked_out" if outcome["walked_out"] else ("accepted" if accepting else ("finished" if turn == 4 else "active"))
     now = utc_timestamp()
     new_session = {**session, "current_price": outcome["new_price"], "patience": outcome["new_patience"],
         "turn_number": turn, "efficiency": outcome["efficiency_pct"], "status": status, "updated_at": now}
     mood = "furious" if outcome["walked_out"] or outcome["is_jailbreak"] else (
         "sweating" if outcome["new_patience"] < 40 else ("impressed" if move["soft_spot"] else "smug"))
-    record = {"turn_number": turn, "player_transcript": str(dialogue.get("player_transcript") or move.get("player_transcript") or text)[:360],
-        "player_text": text[:1000], "reply_text": dialogue["reply_text"], "coach_tip": dialogue["coach_tip"],
-        "delivery_style": dialogue["delivery_style"], "audio_b64": base64.b64encode(audio).decode("ascii") if audio else None,
+    record = {"turn_number": turn, "player_transcript": str(move.get("player_transcript") or text or "Voice move received")[:360],
+        "player_text": text[:1000], "reply_text": reply_text, "coach_tip": coach_tip,
+        "delivery_style": delivery_style, "audio_b64": None,
         "tactic": move["tactic"], "tactic_badge": move["tactic"].replace("_", " ").title(),
         "soft_spot": bool(move["soft_spot"]), "pet_hate": bool(move["pet_hate"]), "accept_deal": accepting,
         "vocal_conf": round(float(move["vocal_conf"]), 4), "bluff_prob": round(float(move["bluff_prob"]), 4),
@@ -284,14 +361,39 @@ def _submit_turn(body: TurnBody, request: Request):
     except sqlite3.IntegrityError:
         raise HTTPException(409, "This move was already submitted. Refresh the negotiation and try again.") from None
     del audio_bytes
+    audio_pending = gemini_pipeline.tts_available()
     return {"session_id": body.session_id, "turn": turn, "turn_limit": 4, "current_price": outcome["new_price"],
         "price_delta": outcome["price_delta"], "patience": outcome["new_patience"],
         "vocal_confidence": round(float(move["vocal_conf"]) * 100), "bluff_credibility": round(float(move["bluff_prob"]) * 100),
         "opponent_patience": outcome["new_patience"], "tactic": move["tactic"], "tactic_badge": record["tactic_badge"],
-        "boss_mood": mood, "player_transcript": record["player_transcript"], "reply_text": dialogue["reply_text"],
-        "coach_tip": dialogue["coach_tip"], "audio_b64": record["audio_b64"], "tts_fallback": audio is None,
+        "boss_mood": mood, "player_transcript": record["player_transcript"], "reply_text": reply_text,
+        "coach_tip": coach_tip, "audio_b64": None, "audio_pending": audio_pending, "tts_fallback": not audio_pending,
         "walked_out": outcome["walked_out"], "accepted": accepting, "ended": status != "active",
         "efficiency_pct": outcome["efficiency_pct"]}
+
+
+@app.post("/api/turn/audio")
+def turn_audio(body: TurnAudioBody, request: Request):
+    limited = _rate_limited_response(request, session_limiter)
+    if limited:
+        return limited
+    session = db.get_session(body.session_id)
+    if not session:
+        raise HTTPException(404, "Negotiation session not found.")
+    turn = db.get_turn(body.session_id, body.turn_number)
+    if not turn:
+        raise HTTPException(404, "Turn not found.")
+    arena = arena_by_boss_id(
+        session["boss_id"],
+        start_price=session["start_price"],
+        condition_id=session.get("condition_id") or None,
+    )
+    style = str(turn.get("delivery_style") or "expressive conversational market banter")
+    audio = gemini_pipeline.synthesize_speech(arena, turn["reply_text"], style)
+    audio_b64 = base64.b64encode(audio).decode("ascii") if audio else None
+    if audio_b64:
+        db.save_turn_audio_if_latest(body.session_id, body.turn_number, audio_b64)
+    return {"audio_b64": audio_b64, "tts_fallback": audio_b64 is None}
 
 
 def _final_audio(turns: list[dict]) -> bytes | None:
@@ -304,7 +406,7 @@ def _final_audio(turns: list[dict]) -> bytes | None:
 
 
 def _deal_payload(row: dict) -> dict:
-    arena = arena_by_boss_id(row["boss_id"])
+    arena = arena_by_boss_id(row["boss_id"], start_price=row["start_price"])
     debrief = json.loads(row["debrief_json"])
     movement = row["start_price"] - row["final_price"] if row["direction"] == "downward" else row["final_price"] - row["start_price"]
     left = row["final_price"] - row["limit_price"] if row["direction"] == "downward" else row["limit_price"] - row["final_price"]
@@ -338,7 +440,11 @@ def _finish_session(body: FinishBody):
         raise HTTPException(404, "Negotiation session not found.")
     if session["turn_number"] < 1:
         raise HTTPException(409, "Make at least one counter before locking a deal.")
-    arena = arena_by_boss_id(session["boss_id"])
+    arena = arena_by_boss_id(
+        session["boss_id"],
+        start_price=session["start_price"],
+        condition_id=session.get("condition_id") or None,
+    )
     turns = db.list_turns(body.session_id)
     final_price = session["current_price"]
     debrief = gemini_pipeline.generate_debrief(arena, turns, final_price, session["efficiency"], history=turns)
@@ -416,29 +522,30 @@ def share_deal(deal_id: str):
     row = db.find_deal(deal_id)
     if not row:
         raise HTTPException(404, "Receipt not found.")
-    arena = arena_by_boss_id(row["boss_id"])
+    arena = arena_by_boss_id(row["boss_id"], start_price=row["start_price"])
     start_price = format_indian_rupees(row["start_price"])
     final_price = format_indian_rupees(row["final_price"])
     penalized = (row["final_price"] > row["start_price"] if arena["direction"] == "downward"
                  else row["final_price"] < row["start_price"])
     verb = "talked" if arena["direction"] == "downward" else "pushed"
     direction_word = "down" if arena["direction"] == "downward" else "up"
-    title = (f"{arena['boss_name']} slammed the shutter on me on MolBhaav!" if row["status"] == "walked_out"
-             else f"I locked {final_price} with {arena['boss_name']} on MolBhaav" if row["final_price"] == row["start_price"]
-             else f"{arena['boss_name']} pushed my price up from {start_price} to {final_price} on MolBhaav" if penalized and arena["direction"] == "downward"
-             else f"{arena['boss_name']} lowered my offer from {start_price} to {final_price} on MolBhaav" if penalized
-             else f"I {verb} {arena['boss_name']} {direction_word} from {start_price} to {final_price} on MolBhaav")
+    title = (f"{arena['boss_name']} slammed the shutter on me on BhavTaal!" if row["status"] == "walked_out"
+             else f"I locked {final_price} with {arena['boss_name']} on BhavTaal" if row["final_price"] == row["start_price"]
+             else f"{arena['boss_name']} pushed my price up from {start_price} to {final_price} on BhavTaal" if penalized and arena["direction"] == "downward"
+             else f"{arena['boss_name']} lowered my offer from {start_price} to {final_price} on BhavTaal" if penalized
+             else f"I {verb} {arena['boss_name']} {direction_word} from {start_price} to {final_price} on BhavTaal")
     description = (f"{arena['boss_name']} slammed the shutter on me in {arena['arena_label']}."
                    if row["status"] == "walked_out" else f"Hear the boss's reaction and try to beat this {arena['arena_label']} deal.")
     safe_title, safe_description = html.escape(title, quote=True), html.escape(description, quote=True)
     return HTMLResponse(f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{safe_title}</title>
 <meta name="description" content="{safe_description}"><meta property="og:title" content="{safe_title}"><meta property="og:description" content="{safe_description}"><meta property="og:type" content="website"><meta name="twitter:card" content="summary">
-<link rel="icon" href="data:,"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/static/styles.css?v=5"><script defer src="/static/receipt_canvas.js?v=5"></script><script defer src="/static/app.js?v=5"></script></head>
-<body data-deal-id="{html.escape(deal_id, quote=True)}"><div class="phone-shell share-shell"><header class="topbar"><a class="wordmark" href="/">Mol<span>Bhaav</span></a><a class="nav-pill" href="/">Enter the arena ↗</a></header><main id="receipt-root" class="receipt-root" aria-live="polite"><p class="eyebrow">THERMAL DEAL RECEIPT</p><h1>{safe_title}</h1><p>Loading your receipt…</p></main></div><div class="toast" id="toast" role="status" aria-live="polite"></div></body></html>''')
+<link rel="icon" href="data:,"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="/static/styles.css?v=10"><script defer src="/static/receipt_canvas.js?v=10"></script><script defer src="/static/app.js?v=10"></script></head>
+<body data-deal-id="{html.escape(deal_id, quote=True)}"><div class="phone-shell share-shell"><header class="topbar"><a class="wordmark" href="/">Bhav<span>Taal</span></a><a class="nav-pill" href="/">Enter the arena ↗</a></header><main id="receipt-root" class="receipt-root" aria-live="polite"><p class="eyebrow">THERMAL DEAL RECEIPT</p><h1>{safe_title}</h1><p>Loading your receipt…</p></main></div><div class="toast" id="toast" role="status" aria-live="polite"></div></body></html>''')
 
 
 def _rotate_daily():
-    yesterday = (now_ist().date() - timedelta(days=1)).isoformat()
+    effective_today = (now_ist() + timedelta(minutes=2)).date()
+    yesterday = (effective_today - timedelta(days=1)).isoformat()
     archived = db.archive_day(yesterday, list(ARENA_IDS), utc_timestamp())
     audio_cutoff = (datetime.now(UTC) - timedelta(hours=2)).isoformat(timespec="seconds")
     db.prune_stale_session_audio(audio_cutoff)
@@ -447,7 +554,8 @@ def _rotate_daily():
 
 def _require_schedule_auth(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET")
-    if not expected or request.headers.get("authorization") != f"Bearer {expected}":
+    actual = request.headers.get("authorization") or ""
+    if not expected or not hmac.compare_digest(actual, f"Bearer {expected}"):
         raise HTTPException(401, "Unauthorized schedule request.")
 
 

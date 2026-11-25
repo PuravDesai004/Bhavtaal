@@ -29,7 +29,7 @@
       ctx.fillStyle = color; ctx.font = font; ctx.textAlign = "center"; ctx.fillText(text, 540, yy, 800);
     };
     const rule = (yy) => { ctx.save(); ctx.setLineDash([10, 11]); ctx.strokeStyle = "#8B857B"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(145, yy); ctx.lineTo(935, yy); ctx.stroke(); ctx.restore(); };
-    center("MolBhaav", 205, "700 62px 'Space Grotesk', sans-serif");
+    center("BhavTaal", 205, "700 62px 'Space Grotesk', sans-serif");
     center(walkedOut ? "STREET SMART · WALKOUT RECEIPT" : "STREET SMART · DEAL RECEIPT", 260, "600 23px 'JetBrains Mono', monospace", "#706C64");
     rule(305);
     center(`${deal.arena_label || "BAZAAR"}  ·  ${deal.date_ist || "TODAY"}`, 365, "600 24px 'JetBrains Mono', monospace");
@@ -73,14 +73,14 @@
       ctx.fillRect(150 + i * 17, 1510 - barH / 2, 7, barH);
     }
     center("TRY TO BEAT THIS DEAL", 1640, "700 30px 'Space Grotesk', sans-serif");
-    center("MOLBHAAV · NO LOGIN · ALL STREET SMART", 1720, "600 18px 'JetBrains Mono', monospace", "#706C64");
+    center("BHAVTAAL · NO LOGIN · ALL STREET SMART", 1720, "600 18px 'JetBrains Mono', monospace", "#706C64");
     return canvas;
   }
   window.ReceiptCanvas = {
     async download(deal) {
       await Promise.resolve(document.fonts?.ready).catch(() => {});
       const canvas = draw(deal);
-      const filename = `molbhaav-receipt-${deal.deal_id || "deal"}.png`;
+      const filename = `bhavtaal-receipt-${deal.deal_id || "deal"}.png`;
       const trigger = (href, revoke) => {
         const link = document.createElement("a");
         link.download = filename;

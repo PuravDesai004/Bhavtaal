@@ -4,7 +4,7 @@
     {
       "name": "archive daily market winners",
       "path": "/api/internal/rotate-daily",
-      "cron": "0 0 * * *",
+      "cron": "1 0 * * *",
       "timezone": "Asia/Kolkata"
     }
   ]

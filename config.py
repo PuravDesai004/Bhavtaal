@@ -17,7 +17,7 @@ STATIC_DIR = APP_DIR / "static"
 IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 UTC = timezone.utc
 DAILY_EPOCH_DATE = date(2026, 11, 24)
-DAILY_BOSS_COUNT = 4
+DAILY_BOSS_COUNT = 5
 
 
 def data_dir() -> Path:
@@ -25,11 +25,11 @@ def data_dir() -> Path:
 
 
 def database_path() -> Path:
-    return data_dir() / "molbhaav.db"
+    return data_dir() / "bhavtaal.db"
 
 
 def app_name() -> str:
-    return os.environ.get("APP_NAME", "molbhaav")
+    return os.environ.get("APP_NAME", "bhavtaal")
 
 
 def port() -> int:
@@ -53,8 +53,14 @@ def ist_date(value: datetime | date | None = None) -> date:
     return value
 
 
+def daily_pool_index(pool_size: int, value: datetime | date | None = None) -> int:
+    if pool_size <= 0:
+        raise ValueError("pool_size must be positive")
+    return (ist_date(value) - DAILY_EPOCH_DATE).days % pool_size
+
+
 def daily_boss_index(value: datetime | date | None = None) -> int:
-    return (ist_date(value) - DAILY_EPOCH_DATE).days % DAILY_BOSS_COUNT
+    return daily_pool_index(DAILY_BOSS_COUNT, value)
 
 
 def utc_timestamp() -> str:

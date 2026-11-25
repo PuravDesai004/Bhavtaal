@@ -1,10 +1,10 @@
-# MolBhaav
+# BhavTaal
 
-MolBhaav is a mobile-first voice bargaining game built with FastAPI, SQLite, vanilla JavaScript, and Google's Gemini API. It supports spoken or typed offers, deterministic price movement, daily arenas and leaderboards, and shareable deal receipts.
+BhavTaal is a mobile-first voice bargaining game built with FastAPI, SQLite, vanilla JavaScript, and Google's Gemini API. It supports spoken or typed offers, deterministic price movement, daily arenas and leaderboards, and shareable deal receipts.
 
 ## Run locally
 
-From the `molbhaav` directory, create an environment and install the pinned dependencies:
+From the `bhavtaal` directory, create an environment and install the pinned dependencies:
 
 ```powershell
 py -m venv .venv
@@ -20,11 +20,12 @@ Open `http://127.0.0.1:8000`. The server binds to `0.0.0.0`; set `PORT` to chang
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMINI_API_KEY` | Enables Gemini turn analysis, debriefs, and generated voice. Without it, the app uses its built-in deterministic conversation fallback and browser speech. |
+| `GEMINI_API_KEY` | Enables Gemini turn analysis, debriefs, and fallback voice synthesis. Without it, the app uses its built-in deterministic conversation fallback and browser speech. |
+| `SARVAM_API_KEY` | Enables Sarvam AI (`bulbul:v4-flash`) as the primary Indian-accent voice engine. When omitted or exhausted, the app falls back automatically to Gemini TTS or browser speech. |
 | `DATA_DIR` | SQLite and local audio directory; defaults to `./local_data`. |
 | `PORT` | HTTP listen port; defaults to `8000`. |
 | `STORAGE_URL` and `STORAGE_TOKEN` | Enable Embarko file storage for generated boss-reaction WAVs. With either value absent, audio uses local storage. |
-| `APP_NAME` | Embarko storage app name; defaults to `molbhaav`. |
+| `APP_NAME` | Embarko storage app name; defaults to `bhavtaal`. |
 | `CRON_SECRET` | Required bearer token for the daily archive route. Embarko schedules provide this secret to scheduled requests. |
 
 User microphone recordings are processed for the current turn and are not written to disk. The app stores negotiation text and deal data in SQLite. It saves only generated boss-reaction audio, when available.
@@ -57,8 +58,8 @@ python -m pytest -q
 
 ## Embarko deployment checklist
 
-1. Deploy the `molbhaav` directory as the app root, including `main.py`, `requirements.txt`, `embarko.json`, and the `static`, `tests`, and Python module files.
-2. Add `GEMINI_API_KEY` as an app secret to enable Gemini features. Leave it unset to use the deterministic fallback.
+1. Deploy the `bhavtaal` directory as the app root, including `main.py`, `requirements.txt`, `embarko.json`, and the `static`, `tests`, and Python module files.
+2. Add `GEMINI_API_KEY` and `SARVAM_API_KEY` as app secrets in Embarko's **App setup** tab (`SARVAM_API_KEY` powers primary Indian-accent TTS and `GEMINI_API_KEY` powers turn reasoning + fallback TTS). When either is omitted or exhausted, the app falls back automatically.
 3. Add `STORAGE_URL` and `STORAGE_TOKEN` if generated voice clips should use Embarko file storage. The app keeps no user-recorded audio there.
 4. Confirm the deployed service has a durable writable `DATA_DIR` for SQLite, and set that variable if the platform's writable path differs from `./local_data`.
 5. Deploy and check `/api/health`, `/api/arenas`, and `/docs`. A health response of `"storage_mode":"local"` means the storage credentials were not detected; `"gemini_configured":true` means the Gemini key is present.
