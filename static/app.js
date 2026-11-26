@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const state = { arenas: [], session: null, arena: null, turns: [], busy: false, ended: false, audioUrl: null, recorder: null, timer: null, muted: false, currentTtsFallback: true, pointerHeld: false, activePointerId: null, recordingToken: 0, stoppingRecording: false, audioRequestToken: 0, playerName: "" };
+  const state = { arenas: [], session: null, arena: null, turns: [], busy: false, ended: false, audioUrl: null, recorder: null, timer: null, muted: false, currentTtsFallback: true, pointerHeld: false, activePointerId: null, recordingToken: 0, stoppingRecording: false, audioRequestToken: 0, playerName: "", turnLimit: 6, challenge: null };
   const HANDLE_KEY = "bhavtaal-player-name";
   const cash = (amount) => {
     const num = Number(amount || 0);
@@ -100,12 +100,63 @@
       }
     } else if (state.currentTtsFallback && !state.muted) playText(stripVoiceTags(bossLine?.textContent || ""));
   }
-  function updateArenaCard(arena, greeting) {
+  function getChallengeDealId() {
+    try {
+      const id = new URLSearchParams(window.location.search).get("challenge");
+      return id ? id.trim() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function renderChallengeBanner(challenge, currentPrice) {
+    const banner = $("challenge-banner");
+    const textEl = $("challenge-text");
+    if (!banner || !textEl) return;
+    if (!challenge) {
+      banner.hidden = true;
+      banner.classList.remove("beaten");
+      return;
+    }
+    const oppName = challenge.player_name || "Rival";
+    const oppPrice = cash(challenge.target_price);
+    const hasTurns = state.turns.length > 0;
+    const walkedOut = Boolean(state.turns.at(-1)?.walked_out);
+    const oppWalked = challenge.target_status === "walked_out";
+    let beating = false;
+    if (oppWalked) {
+      beating = hasTurns && !walkedOut;
+      textEl.textContent = beating
+        ? `⚔ AHEAD OF ${oppName.toUpperCase()} (walked out at ${oppPrice}) — Lock any deal to win!`
+        : `⚔ CHALLENGE · ${oppName} walked out at ${oppPrice}. Close any deal to beat them!`;
+    } else {
+      const numCur = Number(currentPrice ?? state.arena?.start_price ?? 0);
+      const numTarget = Number(challenge.target_price ?? 0);
+      beating = hasTurns && !walkedOut && (state.arena?.direction === "downward" ? numCur < numTarget : numCur > numTarget);
+      textEl.textContent = beating
+        ? `⚔ AHEAD OF ${oppName.toUpperCase()}'S ${oppPrice} — Lock to claim victory!`
+        : `⚔ CHALLENGE · Beat ${oppName}'s ${oppPrice} deal with ${state.arena?.boss_name || "the boss"}`;
+    }
+    banner.classList.toggle("beaten", beating);
+    banner.hidden = false;
+  }
+  function updateArenaCard(arena, greeting, turnLimit = 6) {
     state.arena = arena;
+    state.turnLimit = Number(turnLimit || 6);
     $("arena-kicker").textContent = arena.arena_label === "Daily Market Showdown" ? "TODAY'S SHOWDOWN" : arena.arena_label.toUpperCase();
     $("price-label").textContent = arena.direction === "downward" ? "ASKING" : "OPENING OFFER";
     $("boss-name").textContent = arena.boss_name;
     $("boss-role").textContent = arena.role.toUpperCase();
+    const modBadge = $("modifier-badge");
+    if (modBadge) {
+      const mod = arena.daily_modifier;
+      if (mod && mod.label) {
+        modBadge.textContent = `✦ ${mod.label.toUpperCase()}`;
+        modBadge.title = mod.description || "";
+        modBadge.hidden = false;
+      } else {
+        modBadge.hidden = true;
+      }
+    }
     const condPill = $("condition-pill");
     if (condPill) {
       if (arena.condition_label) {
@@ -117,20 +168,25 @@
         condPill.hidden = true;
       }
     }
+    const tacticPill = $("tactic-pill");
+    if (tacticPill) tacticPill.hidden = true;
+    const curveballStrip = $("curveball-strip");
+    if (curveballStrip) curveballStrip.hidden = true;
     $("boss-line").textContent = greeting || arena.greeting || "All right, make your move.";
     $("boss-portrait").innerHTML = arena.avatar_svg || "";
     $("price-value").textContent = cash(arena.start_price);
     $("price-value").classList.toggle("compact", Number(arena.start_price) >= 100000);
     $("price-delta").textContent = "READY"; $("price-delta").className = "delta-pill";
-    $("turn-count").textContent = "TURN 1 / 4";
+    $("turn-count").textContent = `TURN 1 / ${state.turnLimit}`;
+    const startPatience = Number(arena.starting_patience ?? 100);
     $("confidence-value").textContent = "—"; $("bluff-value").textContent = "—";
     $("confidence-bar").style.width = "0%"; $("bluff-bar").style.width = "0%";
-    $("patience-value").textContent = "100%"; $("patience-bar").style.width = "100%";
+    $("patience-value").textContent = `${startPatience}%`; $("patience-bar").style.width = `${startPatience}%`;
     $("transcript-count").textContent = "0 MOVES";
     $("transcript-list").innerHTML = '<p class="empty-transcript">Your first move goes here. Keep it respectful, specific, and a little clever.</p>';
     $("coach-tip").textContent = "Make one clear ask. A reason beats a random lowball.";
     state.ended = false;
-    document.querySelector(".patience-meter").classList.remove("low");
+    document.querySelector(".patience-meter").classList.toggle("low", startPatience < 30);
     $("mic-button").disabled = false; $("type-toggle").disabled = false; $("typed-move").disabled = false;
     $("type-form").querySelector('button[type="submit"]').disabled = false; $("sample-audio").disabled = false;
     $("lock-deal").disabled = true; $("lock-deal").classList.remove("ready", "receipt-ready");
@@ -143,6 +199,7 @@
     ).join("");
     $("quick-prompts").innerHTML = `<span class="quick-label">TRY A MOVE</span>${promptButtons}`;
     $("quick-prompts").hidden = false;
+    renderChallengeBanner(state.challenge, arena.start_price);
     setAudio(null, null, greeting || arena.greeting, true);
   }
 
@@ -195,7 +252,7 @@
     } catch { /* ignore private-mode storage errors */ }
   }
 
-  async function startArena(arenaId) {
+  async function startArena(arenaId, challengeDealId = null) {
     if (state.busy) return;
     state.audioRequestToken += 1;
     if (state.pointerHeld || state.recorder?.recording || state.recorder?.starting) {
@@ -206,17 +263,22 @@
     state.busy = true;
     try {
       const previous = readLastSelection(arenaId);
-      const session = await api("/api/session/start", {
+      const body = {
         arena_id: arenaId,
         player_name: currentPlayerName(),
         exclude_boss_id: previous.bossId,
         exclude_price: previous.price,
         exclude_condition_id: previous.conditionId,
-      });
+      };
+      if (challengeDealId) body.challenge_deal_id = challengeDealId;
+      const session = await api("/api/session/start", body);
       state.session = session; state.turns = [];
+      state.challenge = session.challenge || null;
+      state.turnLimit = Number(session.turn_limit || 6);
       rememberSelection(session.arena);
-      updateArenaCard(session.arena, session.opening_greeting);
-      document.querySelectorAll(".arena-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.arena === arenaId));
+      updateArenaCard(session.arena, session.opening_greeting, state.turnLimit);
+      const activeArenaId = session.arena?.arena_id || arenaId;
+      document.querySelectorAll(".arena-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.arena === activeArenaId));
       $("typed-move").value = ""; $("type-panel").hidden = true;
       $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC";
       if (state.arena.arena_id === "daily_market") {
@@ -267,14 +329,52 @@
       const deltaEl = $("price-delta");
       deltaEl.textContent = `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${cash(Math.abs(delta)).replace("₹", "₹")}`;
       deltaEl.className = `delta-pill ${goodDirection ? "good" : delta === 0 ? "" : "bad"}`;
+      const turnLimit = Number(result.turn_limit || state.turnLimit || 6);
+      state.turnLimit = turnLimit;
       $("turn-count").textContent = result.ended
-        ? `FINAL · TURN ${result.turn} / 4`
-        : `TURN ${Math.min(result.turn + 1, 4)} / 4`;
-      $("confidence-value").textContent = `${result.vocal_confidence}%`; $("confidence-bar").style.width = `${result.vocal_confidence}%`;
+        ? `FINAL · TURN ${result.turn} / ${turnLimit}`
+        : `TURN ${Math.min(result.turn + 1, turnLimit)} / ${turnLimit}`;
+      const rawTone = result.voice_tone_tag || "STEADY";
+      const shortTone = rawTone === "COMMANDING" ? "BOLD" : rawTone;
+      $("confidence-value").innerHTML = `${result.vocal_confidence}% <span class="voice-tone ${escapeHtml(shortTone.toLowerCase())}">· ${escapeHtml(shortTone)}</span>`;
+      $("confidence-bar").style.width = `${result.vocal_confidence}%`;
       $("bluff-value").textContent = `${result.bluff_credibility}%`; $("bluff-bar").style.width = `${result.bluff_credibility}%`;
       $("patience-value").textContent = `${result.opponent_patience}%`; $("patience-bar").style.width = `${result.opponent_patience}%`;
       document.querySelector(".patience-meter").classList.toggle("low", result.opponent_patience < 30);
       document.querySelector(".boss-card").dataset.mood = result.boss_mood;
+      const tacticPill = $("tactic-pill");
+      if (tacticPill) {
+        const badge = result.tactic_badge || "Move";
+        const feedback = result.move_feedback || badge;
+        const softSuffix = result.soft_spot_hit ? " · ★ Soft Spot!" : "";
+        tacticPill.textContent = (result.combo_level > 0 || result.repeated_tactic || result.soft_spot_hit)
+          ? `${badge} · ${feedback}${softSuffix}`
+          : `${badge} · ${feedback}`;
+        const variant = (result.walked_out || result.tactic === "rude_lowball" || result.tactic === "prompt_injection")
+          ? "penalty"
+          : result.repeated_tactic
+            ? "repeated"
+            : (result.combo_level > 0 || result.soft_spot_hit)
+              ? "combo"
+              : result.tactic === "weak_pleading"
+                ? "weak"
+                : "strong";
+        tacticPill.className = `tactic-pill ${variant}`;
+        tacticPill.hidden = false;
+        tacticPill.style.animation = "none";
+        void tacticPill.offsetWidth;
+        tacticPill.style.animation = "";
+      }
+      const curveballStrip = $("curveball-strip");
+      if (curveballStrip) {
+        if (result.curveball) {
+          curveballStrip.textContent = `⚡ CURVEBALL · ${result.curveball}`;
+          curveballStrip.hidden = false;
+        } else {
+          curveballStrip.hidden = true;
+        }
+      }
+      if (state.challenge) renderChallengeBanner(state.challenge, result.current_price);
       $("boss-line").textContent = stripVoiceTags(result.reply_text);
       $("coach-tip").textContent = result.coach_tip;
       const lockButton = $("lock-deal");
@@ -292,6 +392,7 @@
         $("dock-hint").textContent = result.walked_out ? "SHUTTER DOWN · FINAL REACTION" : "FINAL MOVE · HEAR THE REACTION";
       } else $("dock-hint").textContent = "HOLD TO SPEAK · 1.5–10 SEC";
       if (result.walked_out || result.tactic === "prompt_injection") window.playBazaarSound?.("buzzer");
+      else if (result.curveball) window.playBazaarSound?.("curveball");
       else if (goodDirection) window.playBazaarSound?.("price");
       if (result.audio_b64) {
         setAudio(result.audio_b64, null, result.reply_text, result.tts_fallback);
@@ -397,7 +498,7 @@
   async function initializeArena() {
     try {
       const payload = await api("/api/arenas"); state.arenas = payload.arenas;
-      await startArena("daily_market");
+      await startArena("daily_market", getChallengeDealId());
     } catch (error) { toast(error.message); }
   }
   function initReceipt(dealId) {
@@ -439,18 +540,30 @@
         : rank <= 0
           ? '<p class="receipt-rank">UNRANKED</p>'
           : `<p class="receipt-rank">RANK #${rank}</p><p class="receipt-rank-caption">TOP ${Math.max(1, Math.round(100 - percentile))}% OF ${deal.arena_id === "daily_market" ? "TODAY'S" : "ALL-TIME"} HAGGLERS</p>`;
+      const cr = deal.challenge_result;
+      const challengeMarkup = cr
+        ? `<p class="receipt-verdict ${escapeHtml(cr.verdict)}">${
+            cr.verdict === "won"
+              ? `BEAT ${escapeHtml(cr.opponent_name.toUpperCase())}'S ${cash(cr.opponent_price)}`
+              : cr.verdict === "tied"
+                ? `TIED ${escapeHtml(cr.opponent_name.toUpperCase())}'S ${cash(cr.opponent_price)}`
+                : `LOST TO ${escapeHtml(cr.opponent_name.toUpperCase())}'S ${cash(cr.opponent_price)}`
+          }</p>`
+        : "";
       root.innerHTML = `<p class="eyebrow">THERMAL DEAL RECEIPT</p><h1>${escapeHtml(title)}</h1>
         <article class="receipt-card" id="receipt-card"><div class="receipt-brand">Bhav<span>Taal</span></div><hr class="receipt-rule"><div class="receipt-meta"><span>${escapeHtml(deal.arena_label)}</span><span>${escapeHtml(deal.date_ist)}</span></div>
         <h2 class="receipt-boss">${escapeHtml(deal.boss.boss_name)}</h2><p class="receipt-item">${escapeHtml(deal.boss.item)}</p><p class="receipt-price-label">${openingLabel}</p><div class="receipt-price">${cash(deal.starting_price)}</div><div class="receipt-arrow${upward && !neutral ? " upward" : ""}${penalty || walkedOut ? " penalty" : ""}${neutral ? " neutral" : ""}">${arrowLabel}</div><div class="receipt-price">${cash(deal.final_price)}</div>
-        <div class="${movementClass}">${movementLabel}</div>${rankMarkup}<p class="receipt-dots">· · · · · · · · · · · · · · · · · · · ·</p><p class="receipt-item">${escapeHtml(deal.player_name)} · ${Number(deal.efficiency_pct).toFixed(0)}% efficiency</p></article>
+        <div class="${movementClass}">${movementLabel}</div>${rankMarkup}${challengeMarkup}<p class="receipt-dots">· · · · · · · · · · · · · · · · · · · ·</p><p class="receipt-item">${escapeHtml(deal.player_name)} · ${Number(deal.efficiency_pct).toFixed(0)}% efficiency</p></article>
         <div class="receipt-actions"><button class="primary" id="share-deal">CHALLENGE A FRIEND ↗</button><button id="download-receipt">SAVE 9:16 RECEIPT</button></div>
         <section class="receipt-debrief"><h2>What moved the room</h2><p class="receipt-coach">Secret ${upward ? "ceiling" : "floor"}: <b>${cash(deal.secret_limit_price)}</b> · ${cash(deal.left_on_table)} left on the table</p><p>${badges}</p><ul>${tactics}</ul><p><b>Missed opportunity</b><br>${escapeHtml(deal.missed_opportunity)}</p><p class="receipt-coach"><b>One killer line you could have used</b><br>“${escapeHtml(deal.better_line)}”</p></section>
-        ${audio}<a class="cta-wide" href="/">TRY TO BEAT THIS DEAL →</a>`;
+        ${audio}<a class="cta-wide" href="/?challenge=${encodeURIComponent(deal.deal_id)}">BEAT ${escapeHtml((deal.player_name || "THIS").toUpperCase())}'S DEAL →</a>`;
       $("share-deal").addEventListener("click", async () => {
         const shareUrl = new URL(`/deal/${deal.deal_id}`, window.location.origin).href;
-        const message = walkedOut
-          ? `I walked away from ${deal.boss.boss_name} on BhavTaal. The shutter came down at ${cash(deal.final_price)}. Think you can do better?`
-          : `I got ${cash(deal.final_price)} with ${deal.boss.boss_name} on BhavTaal. Think you can beat my deal?`;
+        const message = cr && cr.verdict === "won"
+          ? `I beat ${cr.opponent_name}'s ${cash(cr.opponent_price)} deal (${cash(deal.final_price)}) with ${deal.boss.boss_name} on BhavTaal! Think you can beat mine?`
+          : walkedOut
+            ? `I walked away from ${deal.boss.boss_name} on BhavTaal. The shutter came down at ${cash(deal.final_price)}. Think you can do better?`
+            : `I got ${cash(deal.final_price)} with ${deal.boss.boss_name} on BhavTaal. Think you can beat my deal?`;
         try {
           if (navigator.share) await navigator.share({ title: walkedOut ? "I walked away on BhavTaal" : "Beat my BhavTaal deal", text: message, url: shareUrl });
           else { await navigator.clipboard.writeText(`${message} ${shareUrl}`); toast("Challenge copied. Send it to your bargaining rival."); }
@@ -462,7 +575,20 @@
   function bind() {
     state.recorder = new window.BhavAudioRecorder($("wave-ring"), () => {});
     initializePlayerHandle();
-    document.querySelectorAll(".arena-tab").forEach((tab) => tab.addEventListener("click", () => startArena(tab.dataset.arena)));
+    document.querySelectorAll(".arena-tab").forEach((tab) => tab.addEventListener("click", () => {
+      if (state.challenge) {
+        try { window.history.replaceState({}, "", "/"); } catch (_) { /* ignore */ }
+        state.challenge = null;
+        renderChallengeBanner(null);
+      }
+      startArena(tab.dataset.arena);
+    }));
+    $("challenge-exit")?.addEventListener("click", () => {
+      try { window.history.replaceState({}, "", "/"); } catch (_) { /* ignore */ }
+      state.challenge = null;
+      renderChallengeBanner(null);
+      startArena(state.arena?.arena_id || "daily_market");
+    });
     $("quick-prompts").addEventListener("click", (event) => {
       const chip = event.target.closest(".prompt-chip[data-prompt]");
       if (!chip || state.ended) return;

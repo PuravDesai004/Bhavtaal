@@ -10,10 +10,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css?v=10">
-  <script defer src="/static/audio_recorder.js?v=10"></script>
-  <script defer src="/static/receipt_canvas.js?v=10"></script>
-  <script defer src="/static/app.js?v=10"></script>
+  <link rel="stylesheet" href="/static/styles.css?v=11">
+  <script defer src="/static/audio_recorder.js?v=11"></script>
+  <script defer src="/static/receipt_canvas.js?v=11"></script>
+  <script defer src="/static/app.js?v=11"></script>
 </head>
 <body>
   <div class="phone-shell">
@@ -41,9 +41,11 @@
     </nav>
 
     <main id="arena-view">
+      <div id="challenge-banner" class="challenge-banner" hidden><span id="challenge-text"></span><button type="button" id="challenge-exit" class="challenge-exit" aria-label="Exit challenge">×</button></div>
       <section class="price-stage" aria-label="Current deal price">
-        <div class="stage-topline"><span class="eyebrow" id="arena-kicker">TODAY'S SHOWDOWN</span><span class="turn-pill" id="turn-count">TURN 1 / 4</span></div>
+        <div class="stage-topline"><div class="stage-meta"><span class="eyebrow" id="arena-kicker">TODAY'S SHOWDOWN</span><span id="modifier-badge" class="modifier-pill" hidden></span></div><span class="turn-pill" id="turn-count">TURN 1 / 6</span></div>
         <div class="price-row"><div><p class="price-label" id="price-label">ASKING</p><h1 id="price-value" class="price-value">₹—</h1></div><span class="delta-pill" id="price-delta" aria-live="polite">READY</span></div>
+        <div id="tactic-pill" class="tactic-pill" hidden></div>
         <div class="telemetry" aria-label="Negotiation telemetry">
           <div class="meter"><div class="meter-label"><span>CONFIDENCE</span><b id="confidence-value">—</b></div><div class="meter-track"><span id="confidence-bar"></span></div></div>
           <div class="meter"><div class="meter-label"><span>BLUFF</span><b id="bluff-value">—</b></div><div class="meter-track blue"><span id="bluff-bar"></span></div></div>
@@ -56,6 +58,7 @@
         <div class="boss-copy">
           <div class="boss-heading"><div><p class="boss-role" id="boss-role">DAILY MARKET BOSS</p><h2 id="boss-name">Getting the bazaar ready…</h2></div><button class="hear-button" id="sample-audio" aria-label="Hear the boss's mood"><span class="speaker-glyph">♫</span><span>HEAR MOOD</span></button></div>
           <p class="condition-pill" id="condition-pill" hidden></p>
+          <p class="curveball-strip" id="curveball-strip" hidden></p>
           <p class="speech-bubble" id="boss-line">One moment, setting the opening price…</p>
           <div class="voice-line"><button id="voice-play" class="voice-play" aria-label="Play opponent voice" disabled>▶</button><div class="equalizer" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span id="voice-caption">BOSS AUDIO</span><audio id="voice-audio" preload="none"></audio></div>
         </div>

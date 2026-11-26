@@ -71,6 +71,8 @@ def init_db() -> None:
                 efficiency REAL NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'active',
                 condition_id TEXT NOT NULL DEFAULT '',
+                challenge_deal_id TEXT,
+                modifier_id TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -104,6 +106,8 @@ def init_db() -> None:
                 audio_url TEXT,
                 rank INTEGER NOT NULL DEFAULT 0,
                 percentile REAL NOT NULL DEFAULT 0,
+                challenge_deal_id TEXT,
+                modifier_id TEXT,
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS leaderboard (
@@ -131,9 +135,16 @@ def init_db() -> None:
             """
         )
         db.execute("DELETE FROM leaderboard WHERE deal_id IN (SELECT deal_id FROM deals WHERE status='walked_out')")
-        cols = {row["name"] for row in db.execute("PRAGMA table_info(sessions)").fetchall()}
-        if "condition_id" not in cols:
-            db.execute("ALTER TABLE sessions ADD COLUMN condition_id TEXT NOT NULL DEFAULT ''")
+        for table, column, ddl in (
+            ("sessions", "condition_id", "TEXT NOT NULL DEFAULT ''"),
+            ("sessions", "challenge_deal_id", "TEXT"),
+            ("sessions", "modifier_id", "TEXT"),
+            ("deals", "challenge_deal_id", "TEXT"),
+            ("deals", "modifier_id", "TEXT"),
+        ):
+            cols = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in cols:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -148,15 +159,15 @@ def get_session(session_id: str) -> dict[str, Any] | None:
 
 def create_session(values: dict[str, Any]) -> None:
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
-    record = {"condition_id": "", **values}
+    record = {"patience": 100, "condition_id": "", "challenge_deal_id": None, "modifier_id": None, **values}
     with connect() as db:
         if _claim_stale_audio_prune():
             _prune_stale_session_audio(db, cutoff_iso)
         db.execute(
             """INSERT INTO sessions(session_id,arena_id,boss_id,player_name,date_ist,current_price,
-               start_price,patience,turn_number,efficiency,status,condition_id,created_at,updated_at)
+               start_price,patience,turn_number,efficiency,status,condition_id,challenge_deal_id,modifier_id,created_at,updated_at)
                VALUES(:session_id,:arena_id,:boss_id,:player_name,:date_ist,:current_price,
-               :start_price,100,0,0,'active',:condition_id,:created_at,:updated_at)""",
+               :start_price,:patience,0,0,'active',:condition_id,:challenge_deal_id,:modifier_id,:created_at,:updated_at)""",
             record,
         )
 
@@ -236,13 +247,16 @@ def find_deal(deal_id: str) -> dict[str, Any] | None:
 
 
 def save_deal(deal: dict[str, Any]) -> None:
+    record = {"challenge_deal_id": None, "modifier_id": None, **deal}
     with connect() as db:
         db.execute(
             """INSERT INTO deals(deal_id,session_id,arena_id,boss_id,player_name,date_ist,start_price,
-               final_price,limit_price,direction,efficiency,patience,status,debrief_json,audio_url,rank,percentile,created_at)
+               final_price,limit_price,direction,efficiency,patience,status,debrief_json,audio_url,
+               rank,percentile,challenge_deal_id,modifier_id,created_at)
                VALUES(:deal_id,:session_id,:arena_id,:boss_id,:player_name,:date_ist,:start_price,
-               :final_price,:limit_price,:direction,:efficiency,:patience,:status,:debrief_json,:audio_url,:rank,:percentile,:created_at)""",
-            deal,
+               :final_price,:limit_price,:direction,:efficiency,:patience,:status,:debrief_json,:audio_url,
+               :rank,:percentile,:challenge_deal_id,:modifier_id,:created_at)""",
+            record,
         )
         if deal["status"] != "walked_out":
             db.execute(

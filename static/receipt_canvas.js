@@ -66,14 +66,33 @@
       center(`TOP ${Math.max(1, Math.round(100 - percentile))}% OF ${deal.arena_id === "daily_market" ? "TODAY'S" : "ALL-TIME"} HAGGLERS`, 1298, "600 22px 'JetBrains Mono', monospace", "#706C64");
     }
     rule(1365);
-    center("YOUR BOSS IS STILL TALKING…", 1435, "700 23px 'JetBrains Mono', monospace");
+    center("YOUR BOSS IS STILL TALKING…", 1425, "700 23px 'JetBrains Mono', monospace");
     for (let i = 0; i < 45; i += 1) {
       const barH = 18 + ((i * 37 + Number(deal.final_price || 0)) % 70);
       ctx.fillStyle = i % 5 === 0 ? "#DC2626" : "#18181B";
-      ctx.fillRect(150 + i * 17, 1510 - barH / 2, 7, barH);
+      ctx.fillRect(150 + i * 17, 1495 - barH / 2, 7, barH);
     }
-    center("TRY TO BEAT THIS DEAL", 1640, "700 30px 'Space Grotesk', sans-serif");
-    center("BHAVTAAL · NO LOGIN · ALL STREET SMART", 1720, "600 18px 'JetBrains Mono', monospace", "#706C64");
+    const cr = deal.challenge_result;
+    if (cr) {
+      const oppName = String(cr.opponent_name || "RIVAL").toUpperCase();
+      const oppPrice = `₹${money(cr.opponent_price)}`;
+      const verdictText = cr.verdict === "won"
+        ? `BEAT ${oppName}'S ${oppPrice}`
+        : cr.verdict === "tied"
+          ? `TIED ${oppName}'S ${oppPrice}`
+          : `LOST TO ${oppName}'S ${oppPrice}`;
+      const vColor = cr.verdict === "won" ? "#15803D" : cr.verdict === "tied" ? "#92400E" : "#DC2626";
+      const vFill = cr.verdict === "won" ? "#E7F3E8" : cr.verdict === "tied" ? "#FEF3C7" : "#FDE7E4";
+      ctx.save(); ctx.translate(540, 1605); ctx.rotate(0.025); ctx.fillStyle = vFill; ctx.strokeStyle = vColor; ctx.lineWidth = 3;
+      ctx.fillRect(-300, -34, 600, 68); ctx.strokeRect(-300, -34, 600, 68);
+      ctx.fillStyle = vColor; ctx.font = "700 26px 'JetBrains Mono', monospace"; ctx.textAlign = "center";
+      ctx.fillText(verdictText, 0, 9, 570); ctx.restore();
+      center("TRY TO BEAT THIS DEAL", 1700, "700 28px 'Space Grotesk', sans-serif");
+      center("BHAVTAAL · NO LOGIN · ALL STREET SMART", 1765, "600 18px 'JetBrains Mono', monospace", "#706C64");
+    } else {
+      center("TRY TO BEAT THIS DEAL", 1640, "700 30px 'Space Grotesk', sans-serif");
+      center("BHAVTAAL · NO LOGIN · ALL STREET SMART", 1720, "600 18px 'JetBrains Mono', monospace", "#706C64");
+    }
     return canvas;
   }
   window.ReceiptCanvas = {

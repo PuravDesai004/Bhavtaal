@@ -6,7 +6,7 @@ import random
 from copy import deepcopy
 from datetime import date, datetime
 
-from config import daily_boss_index, daily_pool_index, format_indian_rupees
+from config import daily_boss_index, daily_modifier_index, daily_pool_index, format_indian_rupees
 
 
 def _avatar(name: str, jacket: str, skin: str, hair: str, accessory: str = "") -> str:
@@ -55,6 +55,7 @@ DAILY_BOSSES: list[dict] = [
             {"label": "Respectful anchor", "text": "Love the stitching. I can pay by UPI right now—would ₹1,400 work?"},
             {"label": "Buy two", "text": "If I take two jackets today, can you do ₹1,950 each?"},
         ],
+        "curveball": "Another buyer just picked up this same jacket and is offering ₹2,500 on the spot — why should I hold it for you?",
         "avatar_svg": _avatar("Ramesh Bhaiya", "#2563EB", "#B96F45", "#20202A", '<path d="M52 59q38-22 78 0" fill="#F59E0B" stroke="#18181B" stroke-width="5"/>'),
     },
     {
@@ -70,6 +71,7 @@ DAILY_BOSSES: list[dict] = [
             {"label": "Respect the drive", "text": "It's late and you have a long drive. Could we do ₹1,650? I'll book you again tomorrow."},
             {"label": "Pay now", "text": "I can pay now and meet you at arrivals. Is ₹1,500 fair?"},
         ],
+        "curveball": "A flight of 4 tourists from Delhi just stepped out waving ₹3,000 for Calangute — make me stay!",
         "avatar_svg": _avatar("Raju Anna", "#15803D", "#A9603D", "#191919", '<path d="M52 57q38-31 78 0l-5 9H58z" fill="#DC2626" stroke="#18181B" stroke-width="4"/>'),
     },
     {
@@ -85,6 +87,7 @@ DAILY_BOSSES: list[dict] = [
             {"label": "Quiet student", "text": "I'm a quiet, clean student. Could you do ₹14,000 if I pay two months up front?"},
             {"label": "Pay in advance", "text": "I can commit for a year and pay the advance today. Would ₹13,500 work?"},
         ],
+        "curveball": "A quiet PhD girl from Pune just WhatsApped offering full ₹18,000 plus advance — convince me!",
         "avatar_svg": _avatar("Kamla Aunty", "#DC2626", "#C98259", "#29202A", '<path d="M61 111q29 25 58 0" fill="none" stroke="#F59E0B" stroke-width="6"/><circle cx="90" cy="60" r="4" fill="#DC2626"/>'),
     },
     {
@@ -100,6 +103,7 @@ DAILY_BOSSES: list[dict] = [
             {"label": "Battery health", "text": "At 86% battery health, I can pick it up today and pay by UPI. Would ₹44,500 work?"},
             {"label": "Same-day pickup", "text": "If we meet today and I pay on the spot, can we settle at ₹43,000?"},
         ],
+        "curveball": "My college friend just messaged ₹50,000 cash pickup in 30 minutes — beat that or match the value!",
         "avatar_svg": _avatar("Vicky", "#7C3AED", "#BE7956", "#171717", '<rect x="47" y="65" width="34" height="19" rx="8" fill="none" stroke="#18181B" stroke-width="4"/><rect x="99" y="65" width="34" height="19" rx="8" fill="none" stroke="#18181B" stroke-width="4"/><path d="M81 73h18" stroke="#18181B" stroke-width="4"/>'),
     },
     {
@@ -115,6 +119,7 @@ DAILY_BOSSES: list[dict] = [
             {"label": "Service & tyre cost", "text": "Rear tyre and servicing need about ₹3,000, plus RTO transfer. Can we settle at ₹43,500 by UPI today?"},
             {"label": "Instant RC deal", "text": "If I handle RC transfer myself and pay full amount today, can you close at ₹42,000?"},
         ],
+        "curveball": "A delivery fleet guy just offered ₹49,000 cash right now without checking tyres — give me a solid reason to deal with you!",
         "avatar_svg": _avatar("Bunty Bikes", "#0D9488", "#B6734D", "#1E1B18", '<path d="M52 57h76v9H52z" fill="#F59E0B" stroke="#18181B" stroke-width="3.5"/><path d="M68 118h44" stroke="#F59E0B" stroke-width="5"/>'),
     },
 ]
@@ -133,6 +138,7 @@ PLACEMENT_HR_BOSSES: list[dict] = [
             {"label": "Show impact", "text": "My data pipeline cut reporting time by 40%. Could we discuss ₹9.5 LPA?"},
             {"label": "Market offer", "text": "I have a competing offer at ₹9.0 LPA. Can you match or improve it?"},
         ],
+        "curveball": "Our VP says we have two other finalists ready to sign at band base — justify stretching for you!",
         "avatar_svg": _avatar("Meera Nair", "#2563EB", "#A96F4F", "#201D2B", '<path d="M53 54q37-26 74 0" fill="none" stroke="#F59E0B" stroke-width="9" stroke-linecap="round"/>'),
     },
     {
@@ -148,6 +154,7 @@ PLACEMENT_HR_BOSSES: list[dict] = [
             {"label": "Scale impact", "text": "I scaled a checkout API to 5k RPS with 99.95% uptime. Could we look at ₹12.0 LPA?"},
             {"label": "Ownership trade", "text": "If I own the UPI reconciliation service from week one, can we stretch to ₹11.5 LPA?"},
         ],
+        "curveball": "A senior internal transfer from our payments team wants this seat at ₹9.5 LPA — prove why we pay extra for you!",
         "avatar_svg": _avatar("Vikram Kulkarni", "#0F766E", "#A86644", "#1F2937", '<rect x="52" y="66" width="30" height="17" rx="5" fill="none" stroke="#18181B" stroke-width="4"/><rect x="98" y="66" width="30" height="17" rx="5" fill="none" stroke="#18181B" stroke-width="4"/><path d="M82 74h16" stroke="#18181B" stroke-width="4"/>'),
     },
     {
@@ -163,6 +170,7 @@ PLACEMENT_HR_BOSSES: list[dict] = [
             {"label": "Immediate joiner", "text": "I can join immediately with zero notice period, and shipped two B2B pilots. Could we do ₹8.0 LPA?"},
             {"label": "Internship ROI", "text": "My last internship lifted trial conversion by 18%. Is ₹7.8 LPA possible in this band?"},
         ],
+        "curveball": "Campus placement team sent three NIT toppers willing to join at our opening band tomorrow — what sets your ROI apart?",
         "avatar_svg": _avatar("Ananya Deshmukh", "#9333EA", "#BF7B57", "#1C1917", '<circle cx="90" cy="60" r="3.5" fill="#DC2626"/><path d="M52 57q38-25 76 0" fill="none" stroke="#F59E0B" stroke-width="6" stroke-linecap="round"/>'),
     },
     {
@@ -178,6 +186,7 @@ PLACEMENT_HR_BOSSES: list[dict] = [
             {"label": "Forecasting ROI", "text": "My demand model reduced stockouts by 14% across hubs. Can we structure ₹13.5 LPA fixed?"},
             {"label": "Peak ops ownership", "text": "I'm happy to lead festive surge forecasting on day one—could we settle around ₹13.0 LPA?"},
         ],
+        "curveball": "Our head of analytics is leaning toward promoting a current ops analyst instead — show me the business upside you bring!",
         "avatar_svg": _avatar("Rohan Iyer", "#0284C7", "#B5724F", "#1F2937", '<path d="M55 56q35-22 70 0" fill="none" stroke="#18181B" stroke-width="6"/>'),
     },
     {
@@ -193,6 +202,7 @@ PLACEMENT_HR_BOSSES: list[dict] = [
             {"label": "Cloud savings", "text": "I trimmed AWS spend by 22% with zero-downtime Kubernetes rollouts. Could we look at ₹16.0 LPA?"},
             {"label": "Notice buyout trade", "text": "If I absorb relocation and join early, can we upgrade the fixed band to ₹15.5 LPA?"},
         ],
+        "curveball": "Finance froze extra lateral budget across two cloud pods this morning — give me concrete cost savings I can take to the VP!",
         "avatar_svg": _avatar("Priya Menon", "#BE123C", "#BD7958", "#18181B", '<circle cx="90" cy="60" r="3" fill="#F59E0B"/><rect x="52" y="67" width="30" height="16" rx="5" fill="none" stroke="#18181B" stroke-width="3.5"/><rect x="98" y="67" width="30" height="16" rx="5" fill="none" stroke="#18181B" stroke-width="3.5"/>'),
     },
 ]
@@ -211,6 +221,7 @@ FREELANCE_BOSSES: list[dict] = [
             {"label": "Phase the MVP", "text": "A phased MVP lets us test revenue before the full build. Could phase one be ₹20,000?"},
             {"label": "Price the scope", "text": "The dashboard adds checkout and retention value. Can we price the full scope at ₹30,000?"},
         ],
+        "curveball": "A cousin in Pune offered me an agency quote at ₹9,500 — why is yours worth more?",
         "avatar_svg": _avatar("Siddharth", "#F59E0B", "#B97856", "#1E1B20", '<path d="M50 62q40-29 80 0" fill="none" stroke="#18181B" stroke-width="7"/>'),
     },
     {
@@ -226,6 +237,7 @@ FREELANCE_BOSSES: list[dict] = [
             {"label": "Festive ROI", "text": "One wedding order covers this build. For a 10-day launch with WhatsApp flow, let's lock ₹36,000."},
             {"label": "Milestone split", "text": "We can launch core catalog first at ₹28,000, then add custom jewellery filters for ₹12,000."},
         ],
+        "curveball": "My Chandni Chowk supplier knows a freelancer quoting ₹15,000 for the whole site — tell me why I shouldn't go with him!",
         "avatar_svg": _avatar("Karan Malhotra", "#B91C1C", "#C5815A", "#18181B", '<path d="M51 58q39-28 78 0" fill="#2563EB" stroke="#18181B" stroke-width="4"/>'),
     },
     {
@@ -241,6 +253,7 @@ FREELANCE_BOSSES: list[dict] = [
             {"label": "Billing reliability", "text": "Razorpay webhooks prevent failed renewals and churn. For full portal + testing, let's set ₹42,000."},
             {"label": "Phased launch", "text": "If we ship test series + subscriptions first for ₹34,000, we protect your runway and launch on time."},
         ],
+        "curveball": "Our angel investor told me to use a ₹12,000 no-code template before Diwali — why pay for a custom portal right now?",
         "avatar_svg": _avatar("Neha Kapoor", "#0284C7", "#BC7754", "#221C29", '<path d="M54 55q36-24 72 0" fill="none" stroke="#15803D" stroke-width="7" stroke-linecap="round"/>'),
     },
     {
@@ -256,6 +269,7 @@ FREELANCE_BOSSES: list[dict] = [
             {"label": "Retry & handover", "text": "Dead-letter retries plus SOP docs ensure zero dropped sponsor leads. Full build fits cleanly at ₹46,000."},
             {"label": "Milestone split", "text": "Let's ship core sync for ₹35,000 first, then analytics digests for ₹15,000."},
         ],
+        "curveball": "A viewer in my Discord offered to cobble together a Zapier script for ₹16,000 this weekend — why hire you?",
         "avatar_svg": _avatar("Arjun Verma", "#4F46E5", "#C07E5B", "#171717", '<path d="M50 61q40-26 80 0" fill="none" stroke="#DC2626" stroke-width="6"/>'),
     },
     {
@@ -271,6 +285,7 @@ FREELANCE_BOSSES: list[dict] = [
             {"label": "Multi-cafe ROI", "text": "Four branches generating 15% repeat table visits pays this back in two weeks—let's price full POS sync at ₹58,000."},
             {"label": "Outlet rollout", "text": "We can validate branch one cleanly at ₹44,000 with staff training, then add multi-branch dashboards."},
         ],
+        "curveball": "Our POS vendor just pitched a bundled generic QR plugin at ₹20,000 flat — justify a custom build!",
         "avatar_svg": _avatar("Divya Sharma", "#EA580C", "#C58360", "#221A1D", '<path d="M53 56q37-25 74 0" fill="none" stroke="#F59E0B" stroke-width="7"/>'),
     },
 ]
@@ -404,6 +419,80 @@ OTHER_ARENAS: dict[str, dict] = {
 }
 
 
+DAILY_MODIFIERS: list[dict] = [
+    {
+        "id": "closing_time",
+        "label": "Closing Time",
+        "description": "Turn 5–6 concessions become 20% bigger",
+    },
+    {
+        "id": "flash_sale",
+        "label": "Flash Sale",
+        "description": "Boss starts 10% softer today",
+    },
+    {
+        "id": "no_chai",
+        "label": "No Chai Today",
+        "description": "Boss starts at 85 patience; weak excuses sting extra",
+    },
+    {
+        "id": "good_booni",
+        "label": "Good Booni",
+        "description": "First-customer luck — soft spot hits feel extra rewarding",
+    },
+    {
+        "id": "peak_rush",
+        "label": "Peak Rush",
+        "description": "5% higher ask & 75 patience, but 2+ tactic combos hit harder",
+    },
+]
+
+
+def daily_modifier(value: datetime | date | None = None) -> dict:
+    return deepcopy(DAILY_MODIFIERS[daily_modifier_index(value)])
+
+
+def modifier_by_id(modifier_id: str | None) -> dict | None:
+    if not modifier_id:
+        return None
+    return next((deepcopy(item) for item in DAILY_MODIFIERS if item["id"] == modifier_id), None)
+
+
+def _apply_daily_modifier(
+    arena: dict,
+    modifier: dict | None,
+    adjust_start_price: bool = True,
+) -> dict:
+    item = deepcopy(arena)
+    if not modifier or item.get("arena_id") != "daily_market":
+        item["modifier_id"] = None
+        item["daily_modifier"] = None
+        item["starting_patience"] = 100
+        return item
+
+    mod_id = modifier["id"]
+    item["modifier_id"] = mod_id
+    item["daily_modifier"] = {
+        "id": mod_id,
+        "label": modifier["label"],
+        "description": modifier["description"],
+    }
+    item["starting_patience"] = 85 if mod_id == "no_chai" else 75 if mod_id == "peak_rush" else 100
+
+    if adjust_start_price and mod_id in {"flash_sale", "peak_rush"}:
+        step = max(1, int(item.get("step", 10)))
+        limit = int(item["limit_price"])
+        base_price = int(item["start_price"])
+        factor = 0.90 if mod_id == "flash_sale" else 1.05
+        scaled = int(round((base_price * factor) / step)) * step
+        if item.get("direction", "downward") == "downward":
+            scaled = max(limit + step, scaled)
+        else:
+            scaled = max(step, min(limit - step, scaled))
+        item = _apply_start_price(item, scaled)
+    return item
+
+
 def _apply_condition(boss: dict, condition: dict | None) -> dict:
     item = deepcopy(boss)
     if not condition:
@@ -434,7 +523,8 @@ def internal_arena(arena_id: str, value: datetime | date | None = None) -> dict:
     result.setdefault("condition_id", "")
     result.setdefault("condition_label", "")
     result.setdefault("condition_brief", "")
-    return result
+    modifier = daily_modifier(value) if arena_id == "daily_market" else None
+    return _apply_daily_modifier(result, modifier, adjust_start_price=True)
 
 
 def pick_arena(
@@ -442,6 +532,7 @@ def pick_arena(
     exclude_boss_id: str | None = None,
     exclude_price: int | None = None,
     exclude_condition_id: str | None = None,
+    modifier_id: str | None = None,
 ) -> dict:
     """Pick a shuffled character, varied starting price, and rotating challenge condition."""
     if arena_id not in ARENA_POOLS:
@@ -452,17 +543,33 @@ def pick_arena(
     chosen["arena_id"] = arena_id
     price_options = chosen.get("start_prices") or [chosen["start_price"]]
     varied = [price for price in price_options if price != exclude_price] or price_options
-    priced = _apply_start_price(chosen, random.choice(varied))
     cond_pool = ARENA_CONDITIONS.get(arena_id, [])
     cond_choices = [c for c in cond_pool if c["condition_id"] != exclude_condition_id] or cond_pool
     condition = random.choice(cond_choices) if cond_choices else None
-    return _apply_condition(priced, condition)
+    modifier = (modifier_by_id(modifier_id) or daily_modifier()) if arena_id == "daily_market" else None
+    base_choice = random.choice(varied)
+    result = _apply_daily_modifier(
+        _apply_condition(_apply_start_price(chosen, base_choice), condition),
+        modifier,
+        adjust_start_price=True,
+    )
+    if exclude_price is not None and result["start_price"] == exclude_price and len(price_options) > 1:
+        alt = next((p for p in price_options if p != base_choice), None)
+        if alt is not None:
+            result = _apply_daily_modifier(
+                _apply_condition(_apply_start_price(chosen, alt), condition),
+                modifier,
+                adjust_start_price=True,
+            )
+    return result
 
 
 def arena_by_boss_id(
     boss_id: str,
     start_price: int | None = None,
     condition_id: str | None = None,
+    modifier_id: str | None = None,
+    adjust_start_price: bool = False,
 ) -> dict:
     for arena_id, pool in ARENA_POOLS.items():
         for boss in pool:
@@ -475,12 +582,21 @@ def arena_by_boss_id(
                     (c for c in ARENA_CONDITIONS.get(arena_id, []) if c["condition_id"] == condition_id),
                     None,
                 ) if condition_id else None
-                return _apply_condition(result, condition)
+                result = _apply_condition(result, condition)
+                modifier = modifier_by_id(modifier_id) if arena_id == "daily_market" else None
+                return _apply_daily_modifier(result, modifier, adjust_start_price=adjust_start_price)
     raise KeyError(boss_id)
 
 
 def public_arena(arena: dict) -> dict:
-    hidden = {"limit_price", "soft_spot_rule", "pet_hate_rule", "greeting_template", "start_prices"}
+    hidden = {
+        "limit_price",
+        "soft_spot_rule",
+        "pet_hate_rule",
+        "greeting_template",
+        "start_prices",
+        "curveball",
+    }
     return {key: deepcopy(value) for key, value in arena.items() if key not in hidden}
 
 

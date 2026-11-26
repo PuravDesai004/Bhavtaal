@@ -18,6 +18,8 @@ IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 UTC = timezone.utc
 DAILY_EPOCH_DATE = date(2026, 11, 24)
 DAILY_BOSS_COUNT = 5
+DAILY_MODIFIER_COUNT = 5
+TURN_LIMIT = 6
 
 
 def data_dir() -> Path:
@@ -61,6 +63,10 @@ def daily_pool_index(pool_size: int, value: datetime | date | None = None) -> in
 
 def daily_boss_index(value: datetime | date | None = None) -> int:
     return daily_pool_index(DAILY_BOSS_COUNT, value)
+
+
+def daily_modifier_index(value: datetime | date | None = None) -> int:
+    return daily_pool_index(DAILY_MODIFIER_COUNT, value)
 
 
 def utc_timestamp() -> str:

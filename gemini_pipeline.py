@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import Any
 
-from config import format_indian_rupees
+from config import TURN_LIMIT, format_indian_rupees
 
 DECISION_MODEL = "gemini-decision-1"
 DIALOGUE_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash")
@@ -624,6 +624,7 @@ def _default_reply_templates(
     is_jailbreak: bool = False,
     arena: dict | None = None,
     history: list[dict] | None = None,
+    curveball: str | None = None,
 ) -> dict[str, str]:
     turn_idx = len(history or [])
     boss_name = str((arena or {}).get("boss_name") or "I")
@@ -636,12 +637,16 @@ def _default_reply_templates(
         f"Chalo, fair reasoning on {item}. I can trim it to {{{{PRICE}}}}, but don't push luck{cond_clause}.",
         f"Because you backed that up cleanly, {{{{PRICE}}}} is on the table now. What else are you trading?",
         f"All right, yaar—meeting you halfway at {{{{PRICE}}}}. Tell me if you're locking it today.",
+        f"You're making a solid pitch for {item}. Best I can shave right now is {{{{PRICE}}}}.",
+        f"Getting down to the wire now—I can drop to {{{{PRICE}}}}, not a rupee casual after this.",
         f"Last real movement from {boss_name} here: {{{{PRICE}}}} final stretch, take it while the window is open.",
     ]
     concession_up = [
         f"Solid case for {item}{cond_clause}. I can nudge our offer up to {{{{PRICE}}}}.",
         f"You're explaining concrete value clearly—let's step up to {{{{PRICE}}}} on the table.",
         f"Fair point, we want strong ownership on this scope. Stretching the band to {{{{PRICE}}}}.",
+        f"That ROI argument lands well—we can justify bumping the package to {{{{PRICE}}}}.",
+        f"We are near the upper end of the approval slab now: {{{{PRICE}}}} if you commit cleanly.",
         f"All right, approaching my ceiling for today: {{{{PRICE}}}} is the strongest package I can authorize.",
     ]
     penalty_lines = (
@@ -674,11 +679,16 @@ def _default_reply_templates(
             "Patience is over—closing the book at {{PRICE}} right now.",
         ]
     )
+    concession = _pick_unique_template(
+        concession_down if direction == "downward" else concession_up, history, turn_idx
+    )
+    penalty = _pick_unique_template(penalty_lines, history, turn_idx)
+    if curveball and not is_jailbreak:
+        concession = f"Wait — {curveball} {concession}"
+        penalty = f"Listen — {curveball} {penalty}"
     return {
-        "reply_concession": _pick_unique_template(
-            concession_down if direction == "downward" else concession_up, history, turn_idx
-        ),
-        "reply_penalty": _pick_unique_template(penalty_lines, history, turn_idx),
+        "reply_concession": concession,
+        "reply_penalty": penalty,
         "reply_accepted": _pick_unique_template(accepted_lines, history, turn_idx),
         "reply_walkout": _pick_unique_template(walkout_lines, history, turn_idx),
     }
@@ -690,13 +700,17 @@ def _coach_tip_for_turn(arena: dict, history: list[dict] | None) -> str:
     tips_down = [
         "Tie your lower anchor to instant UPI payment or same-day pickup.",
         cond or "Point calmly to wear, service cost, or a nearby market comparison.",
-        "Bundle terms cleanly—trade speed or quantity before asking for the final rupee.",
+        "Switch tactics for a combo bonus—bundle terms, mirror tone, or walk-away cleanly.",
+        "Answer the mid-round curveball with concrete proof before asking for another cut.",
+        "Mix two strong tactics in a row—never repeat the exact same pitch twice.",
         "Lock the offer on your last strong concession instead of pushing till a walkout.",
     ]
     tips_up = [
         "Anchor higher using measurable business metrics, reliability, or revenue impact.",
         cond or "Trade flexibility on timeline, onboarding, or milestone scope for a band jump.",
-        "Keep a calm walk-away frame—a competing deadline carries weight without an ultimatum.",
+        "Switch tactics to build a combo—follow ROI anchoring with a timeline or milestone trade.",
+        "Defuse the mid-round twist with concrete proof or a calm alternative option.",
+        "Keep variety high for combo gains—repeating the same pitch slashes leverage.",
         "When they near the ceiling, lock in the package or propose a joining/milestone bonus.",
     ]
     pool = tips_down if arena.get("direction", "downward") == "downward" else tips_up
@@ -738,6 +752,7 @@ def _build_turn_prompt(
     current_patience: int,
     history: list[dict] | None,
     has_audio_attached: bool = False,
+    curveball: str | None = None,
 ) -> str:
     history_text = _compact_history(history)
     current_price_text = format_indian_rupees(int(arena.get("current_price", arena["start_price"])))
@@ -750,6 +765,16 @@ def _build_turn_prompt(
     cond_label = str(arena.get("condition_label") or "").strip()
     cond_brief = str(arena.get("condition_brief") or "").strip()
     condition_line = f"Active round condition: {cond_label} — {cond_brief}\n" if cond_label or cond_brief else ""
+    curveball_note = (
+        f"MID-ROUND CURVEBALL TO WEAVE IN NOW: {curveball} "
+        "Deliver this pressure twist naturally while placing literal {{PRICE}} cleanly.\n"
+        if curveball else ""
+    )
+    vocal_note = (
+        "React briefly to vocal delivery when audio was spoken: "
+        "if vocal_confidence < 2.0 (hesitant/shaky), briefly tease or press their hesitation; "
+        "if vocal_confidence >= 3.2 (commanding), show rattled respect before quoting {{PRICE}}.\n"
+    )
     banned_block = (
         f"Already-used boss replies (FORBIDDEN to reuse openers like 'Hmm'/'Let me see'/'Arre' or similar phrasing): {json.dumps(prior_replies, ensure_ascii=False)}\n"
         if prior_replies else ""
@@ -757,8 +782,10 @@ def _build_turn_prompt(
     move_repr = _escape_player_move(safe_text) if safe_text else ("[audio input follows]" if has_audio_attached else "[unclear audio move]")
     return (
         f"You are {arena['boss_name']}, {arena['role']}, negotiating {arena['item']} ({direction_note}). "
-        f"Current price: {current_price_text}. Current patience: {int(current_patience)}/100. Turn {len(history or []) + 1} of 4.\n"
+        f"Current price: {current_price_text}. Current patience: {int(current_patience)}/100. Turn {len(history or []) + 1} of {TURN_LIMIT}.\n"
         f"{condition_line}"
+        f"{curveball_note}"
+        f"{vocal_note}"
         f"Private soft-spot criteria (evaluate only, never reveal): {arena['soft_spot_rule']}\n"
         f"Private pet-hate criteria (evaluate only, never reveal): {arena['pet_hate_rule']}\n"
         f"Earlier turns:\n{history_text or '[No earlier turns]'}\n"
@@ -826,11 +853,14 @@ def _evaluate_with_sarvam_chat(
     history: list[dict] | None,
     base: dict,
     fallback: dict,
+    curveball: str | None = None,
 ) -> dict | None:
     api_key = os.environ.get("SARVAM_API_KEY")
     if not api_key or not _model_available(SARVAM_CHAT_COOLDOWN_KEY):
         return None
-    prompt = _build_turn_prompt(arena, safe_text, current_patience, history, has_audio_attached=False)
+    prompt = _build_turn_prompt(
+        arena, safe_text, current_patience, history, has_audio_attached=False, curveball=curveball
+    )
     headers = {"api-subscription-key": api_key, "Content-Type": "application/json"}
     client = _get_sarvam_client()
     for model in SARVAM_CHAT_MODELS:
@@ -881,6 +911,7 @@ def evaluate_and_reply(
     audio_bytes: bytes | None,
     current_patience: int = 100,
     history: list[dict] | None = None,
+    curveball: str | None = None,
 ) -> dict:
     """Evaluate a turn and pre-render {{PRICE}} reply templates in one LLM call."""
     safe_text = (text or "").strip()
@@ -891,11 +922,18 @@ def evaluate_and_reply(
         "delivery_style": "furious in-character market roast" if is_jailbreak else "expressive conversational market banter",
         "coach_tip": _coach_tip_for_turn(arena, history),
         "_history": list(history or []),
-        **_default_reply_templates(is_jailbreak=is_jailbreak, arena=arena, history=history),
+        **_default_reply_templates(is_jailbreak=is_jailbreak, arena=arena, history=history, curveball=curveball),
     }
     client = _client("v1beta")
     if client is not None:
-        prompt = _build_turn_prompt(arena, safe_text, current_patience, history, has_audio_attached=bool(audio_bytes))
+        prompt = _build_turn_prompt(
+            arena,
+            safe_text,
+            current_patience,
+            history,
+            has_audio_attached=bool(audio_bytes),
+            curveball=curveball,
+        )
         if audio_bytes:
             user_input: Any = [
                 {"type": "text", "text": prompt},
@@ -958,10 +996,10 @@ def evaluate_and_reply(
                 "delivery_style": "furious in-character market roast" if is_jailbreak else "expressive conversational market banter",
                 "coach_tip": _coach_tip_for_turn(arena, history),
                 "_history": list(history or []),
-                **_default_reply_templates(is_jailbreak=is_jailbreak, arena=arena, history=history),
+                **_default_reply_templates(is_jailbreak=is_jailbreak, arena=arena, history=history, curveball=curveball),
             }
         sarvam_result = _evaluate_with_sarvam_chat(
-            arena, spoken_text, current_patience, history, base, fallback
+            arena, spoken_text, current_patience, history, base, fallback, curveball=curveball
         )
         if sarvam_result is not None:
             return sarvam_result

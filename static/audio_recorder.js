@@ -223,8 +223,12 @@
       const gain = audioContext.createGain();
       oscillator.connect(gain); gain.connect(audioContext.destination);
       const now = audioContext.currentTime;
-      const frequencies = kind === "lock" ? [740, 980] : kind === "buzzer" ? [180, 95] : [540, 820];
-      oscillator.type = kind === "buzzer" ? "sawtooth" : "sine";
+      const frequencies =
+        kind === "lock" ? [740, 980] :
+        kind === "buzzer" ? [180, 95] :
+        kind === "curveball" ? [620, 410] :
+        [540, 820];
+      oscillator.type = kind === "buzzer" ? "sawtooth" : kind === "curveball" ? "triangle" : "sine";
       oscillator.frequency.setValueAtTime(frequencies[0], now);
       oscillator.frequency.exponentialRampToValueAtTime(frequencies[1], now + .14);
       gain.gain.setValueAtTime(.0001, now); gain.gain.exponentialRampToValueAtTime(.11, now + .015);
